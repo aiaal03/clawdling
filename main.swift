@@ -1036,9 +1036,10 @@ final class App: NSObject, NSApplicationDelegate {
     /// Velocity that lifts the pet `h` points (scaled with the pet's size).
     func hop(_ h: CGFloat) -> CGFloat { (2 * G * h * CGFloat(world.save.scale)).squareRoot() }
 
-    /// Is there a screen at this x (near this height)? Lets a throw carry the pet to the next monitor.
+    /// Is there a screen right at this point? Lets a throw carry the pet to a monitor that really
+    /// continues at the pet's height — never into the empty gap between offset monitors.
     func screenExists(x: CGFloat, y: CGFloat) -> Bool {
-        NSScreen.screens.contains { $0.frame.minX <= x && x <= $0.frame.maxX && $0.frame.minY - 200 <= y && y <= $0.frame.maxY + 200 }
+        NSScreen.screens.contains { $0.frame.contains(NSPoint(x: x, y: y)) }
     }
 
     func roamStep(dt: CGFloat, now: Double) {
@@ -1065,8 +1066,9 @@ final class App: NSObject, NSApplicationDelegate {
             view.spin += spinRate * dt * 60 * 0.05
             // walls and ceiling of this screen; open sides lead to the next monitor
             let edgeL = vis.minX + 40 * s, edgeR = vis.maxX - 40 * s
-            if cx < edgeL && !screenExists(x: cx - 60 * s, y: floor + air) { cx = edgeL; vx = abs(vx) * 0.5; spinRate = -spinRate }
-            if cx > edgeR && !screenExists(x: cx + 60 * s, y: floor + air) { cx = edgeR; vx = -abs(vx) * 0.5; spinRate = -spinRate }
+            let body = floor + air + 50 * s   // the pet's middle
+            if cx < edgeL && !screenExists(x: cx - 60 * s, y: body) { cx = edgeL; vx = abs(vx) * 0.5; spinRate = -spinRate }
+            if cx > edgeR && !screenExists(x: cx + 60 * s, y: body) { cx = edgeR; vx = -abs(vx) * 0.5; spinRate = -spinRate }
             let ceiling = vis.maxY - floor - H * s
             if air > ceiling && vy > 0 { air = ceiling; vy = -vy * 0.4 }
             if air <= 0 {
@@ -1149,6 +1151,10 @@ final class App: NSObject, NSApplicationDelegate {
             }
         }
         if !flying { cx = min(max(cx, minC), maxC) }
+        else if !screenExists(x: cx, y: floor + max(air, 0) + 50 * s) {
+            cx = min(max(cx, minC), maxC)
+            vx = -vx * 0.5
+        }
         toy?.step(dt: dt, t: view.t, floor: floor, minX: vis.minX, maxX: vis.maxX)
         panel.setFrameOrigin(NSPoint(x: cx - half, y: floor + air - 2 * s))
     }
