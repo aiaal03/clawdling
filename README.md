@@ -64,9 +64,7 @@ Each egg hatches into a random **slime, ghost, kitty, fox kit, froglet, crab or 
 - **Click** to pet it ❤️. **Double-click** for stats.
 - **Drag** it anywhere, or **throw** it: let go while moving and it flies off at your cursor's speed.
 - **Right-click** for the menu: stats, graveyard, size, walking on/off, give a toy, Telegram alerts, quit.
-- Hover over it to see its name and fullness.
-
-The interface is in English, or in Russian when macOS prefers Russian.
+- Hover over it to see its health bar.
 
 ### Telegram alerts (optional)
 
@@ -92,6 +90,3 @@ For development: `CLAWDLING_DIR=/tmp/pet ./build/Clawdling.app/Contents/MacOS/Cl
 
 MIT. Clawdling is a fan project and is not affiliated with or endorsed by Anthropic.
 
----
-
-**По-русски:** Clawdling — тамагочи для macOS, который живёт внизу экрана и ест, пока ты работаешь в Claude Code. Каждый промпт, правка и законченная задача — еда. Не работаешь 48 часов — питомец умирает. Когда Claude закончил задачу, питомец празднует с конфетти; когда нужен approve, достаёт лупу и бежит к курсору. Установка: `git clone`, затем `./install.sh`. Интерфейс на русском, если система на русском.

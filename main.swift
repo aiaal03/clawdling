@@ -21,19 +21,12 @@ let FOOD: [String: (emoji: String, pts: Double)] = [
     "agent": ("🎂", 10), "done": ("🍪", 5), "other": ("🍬", 0.5),
 ]
 
-// Interface language: Russian when the system prefers it, English otherwise.
-let RU = Locale.preferredLanguages.first?.hasPrefix("ru") ?? false
-func L(_ en: String, _ ru: String) -> String { RU ? ru : en }
+let NAMES = ["Bagel", "Pixel", "Muffin", "Sprout", "Mochi", "Tofu", "Byte", "Button",
+             "Dumpling", "Marshmallow", "Chip", "Noodle", "Crumb", "Biscuit", "Donut", "Bit"]
 
-let NAMES = RU
-    ? ["Бублик", "Пиксель", "Кекс", "Шпрота", "Мочи", "Тофу", "Байт", "Кнопка",
-       "Пельмень", "Зефир", "Чип", "Гоша", "Крошка", "Сухарик", "Пончик", "Бит"]
-    : ["Bagel", "Pixel", "Muffin", "Sprout", "Mochi", "Tofu", "Byte", "Button",
-       "Dumpling", "Marshmallow", "Chip", "Noodle", "Crumb", "Biscuit", "Donut", "Bit"]
-
-let FORM_NAME = ["hacker": L("Hacker", "Хакер"), "builder": L("Builder", "Строитель"),
-                 "explorer": L("Explorer", "Исследователь"), "owl": L("Night Owl", "Сова"),
-                 "queen": L("Hive Queen", "Королева улья")]
+let FORM_NAME = ["hacker": "Hacker", "builder": "Builder",
+                 "explorer": "Explorer", "owl": "Night Owl",
+                 "queen": "Hive Queen"]
 
 // MARK: - Sprites (left half, 8 columns, mirrored to 16)
 
@@ -50,31 +43,31 @@ struct Species {
 }
 
 let SPECIES: [Species] = [
-    Species(id: "slime", name: L("slime", "слизень"), rows: [
+    Species(id: "slime", name: "slime", rows: [
         "........", "........", "......oo", ".....obb", "....obbl", "...obblb", "..obbbbb",
         "..obewbb", ".obbeebb", ".obpbbbm", ".obbbbbb", ".odbbbbb", "..oddddd", "...ooooo",
     ], colors: [0x6fd36b, 0x6ab8f0, 0xf28fc0, 0xb48cf2]),
-    Species(id: "ghost", name: L("ghost", "призрак"), rows: [
+    Species(id: "ghost", name: "ghost", rows: [
         "........", "........", ".....ooo", "....obbb", "...obbbb", "..obbbbb", "..obbbbb",
         "..obewbb", "..obeebb", "..obpbbm", "..obbbbb", "..obbbbb", "..obbobb", "...oo.oo",
     ], colors: [0xf1eefc, 0xdff3ff], light: 0xffffff, outline: 0x6b6390, floats: true),
-    Species(id: "cat", name: L("kitty", "котик"), rows: [
+    Species(id: "cat", name: "kitty", rows: [
         "........", "..o.....", "..oo....", "..oao...", "..obaooo", ".obbbbbb", ".obbbbbb",
         ".obbewbb", ".obbeebb", ".obpbbbm", ".obbbbbb", "..obbbbb", "..obbobb", "...oo.oo",
     ], colors: [0xb9b9c4, 0xf2a65a, 0xf3e2c3, 0x5a5a66], accent: 0xf6a5b5),
-    Species(id: "fox", name: L("fox kit", "лисёнок"), rows: [
+    Species(id: "fox", name: "fox kit", rows: [
         "........", ".o......", ".oo.....", ".oao....", ".oaao...", ".obaaooo", ".obbbbbb",
         ".obbewbb", ".obbeebb", ".obbbbbb", ".olllllm", "..olllll", "...ollll", "....oooo",
     ], colors: [0xf08a3c, 0xe9b44c], accent: 0x3a2620, light: 0xfff3e6),
-    Species(id: "frog", name: L("froglet", "лягушонок"), rows: [
+    Species(id: "frog", name: "froglet", rows: [
         "........", "........", "..ooo...", ".obbbo..", ".obewo..", ".obeeboo", "obbbbbbb",
         "obpbbbbb", "obbbmmmm", "obbbbbbb", ".obbllll", ".obbllll", "..obbooo", ".oooo...",
     ], colors: [0x7cc96a, 0x5fc4b0], light: 0xd9f2b8),
-    Species(id: "crab", name: L("crab", "крабик"), rows: [
+    Species(id: "crab", name: "crab", rows: [
         "........", ".oo.oo..", "oaaoaao.", ".oaaao..", "..oao...", "..oooooo", ".obbbbbb",
         ".obbewbb", "obbbeebb", "obpbbbbm", "obbbbbbb", ".obbbbbb", "..oooooo", ".o.o.o..",
     ], colors: [0xe8604c, 0xf08a5d], accent: 0xc2402f),
-    Species(id: "chick", name: L("chick", "цыплёнок"), rows: [
+    Species(id: "chick", name: "chick", rows: [
         "........", "......o.", "......oo", "....oobb", "...obbbb", "..obbbbb", "..obewbb",
         ".obbeebb", ".obpbbaa", ".obbbbbm", ".obbbbbb", "..obbbbb", "...ooooo", "....a.a.",
     ], colors: [0xffd84d], accent: 0xff9a2e, mouth: 0xff9a2e),
@@ -285,8 +278,7 @@ final class World {
         let days = Int(((t - (p.hatchedAt ?? t)) / 86400).rounded(.down)) + 1
         save.graves.append(Grave(name: p.name, species: p.species, form: p.form, days: days, diedAt: t))
         dirty = true
-        notifyTG(L("🪦 \(p.name) starved to death after \(days) days. Bury them and start over with a new egg.",
-                   "🪦 \(p.name) умер от голода. Прожил дней: \(days). Похорони и начни заново с яйца."))
+        notifyTG("🪦 \(p.name) starved to death after \(days) days. Bury them and start over with a new egg.")
     }
 
     func newEgg(now: Double) {
@@ -319,13 +311,11 @@ final class World {
         let left = DEATH_HOURS * 3600 - (now - pet.lastFood)
         if full(at: now) <= 0 && !pet.notifiedHungry {
             var p = pet; p.notifiedHungry = true; pet = p
-            notifyTG(L("🥺 \(pet.name) is starving. Do some work in Claude Code or they die in \(Int(left / 3600)) h.",
-                       "🥺 \(pet.name) голодает. Открой Claude и поработай хоть немного — иначе через \(Int(left / 3600)) ч он умрёт."))
+            notifyTG("🥺 \(pet.name) is starving. Do some work in Claude Code or they die in \(Int(left / 3600)) h.")
         }
         if left < 6 * 3600 && !pet.notifiedDying {
             var p = pet; p.notifiedDying = true; pet = p
-            notifyTG(L("🚨 Less than 6 hours left for \(pet.name)! One prompt in Claude Code saves them.",
-                       "🚨 \(pet.name) осталось меньше 6 часов! Один промпт в Claude — и он спасён."))
+            notifyTG("🚨 Less than 6 hours left for \(pet.name)! One prompt in Claude Code saves them.")
         }
     }
 
@@ -565,7 +555,7 @@ final class PetView: NSView {
             (p.text as NSString).draw(at: NSPoint(x: p.x, y: p.y), withAttributes: [
                 .font: NSFont.boldSystemFont(ofSize: p.size), .foregroundColor: p.color.withAlphaComponent(a)])
         }
-        // fullness bar and label
+        // health bar
         drawBar(m)
         if searching && m != "dead" && m != "egg" { drawMagnifier() }
         ctx.restoreGState()
@@ -665,33 +655,19 @@ final class PetView: NSView {
     }
 
     func drawBar(_ m: String) {
+        // just the health bar: after a meal, on hover, or while hungry; no text
         let w = world
-        let top = CGFloat(Sprite(m == "dead" ? TOMB_ROWS : m == "egg" ? EGG_ROWS : w.species.rows).top)
+        guard m != "dead" else { return }
+        let top = CGFloat(Sprite(m == "egg" ? EGG_ROWS : w.species.rows).top)
         let y = SPRITE_Y + top * CELL - 14 + bob
-        let hungry = !w.isEgg && !w.pet.dead && w.full(at: now) < 30
+        let hungry = !w.isEgg && w.full(at: now) < 30
         guard hovering || t < barUntil || hungry else { return }
-        let label: String
-        if m == "dead" {
-            label = "\(w.pet.name) · RIP"
-        } else if m == "egg" {
-            let frac = min(1, w.pet.eggPoints / HATCH_POINTS)
-            bar(y: y, frac: frac, color: hex(0xc9b38a))
-            label = L("egg", "яйцо") + " · \(Int(frac * 100))%"
+        if m == "egg" {
+            bar(y: y, frac: min(1, w.pet.eggPoints / HATCH_POINTS), color: hex(0xc9b38a))
         } else {
             let f = w.full(at: now)
-            let col = f > 60 ? hex(0x5cc46a) : f > 30 ? hex(0xf2b33d) : hex(0xe5534b)
-            bar(y: y, frac: f / 100, color: col)
-            let day = Int((now - (w.pet.hatchedAt ?? now)) / 86400) + 1
-            label = "\(w.pet.name) · " + L("day \(day)", "день \(day)")
+            bar(y: y, frac: f / 100, color: f > 60 ? hex(0x5cc46a) : f > 30 ? hex(0xf2b33d) : hex(0xe5534b))
         }
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
-        let shadow: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: hex(0x000000, 0.55)]
-        let s = label as NSString
-        let size = s.size(withAttributes: attrs)
-        guard hovering else { return }
-        let p = NSPoint(x: (W - size.width) / 2, y: y - 15)
-        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] { s.draw(at: NSPoint(x: p.x + CGFloat(dx), y: p.y + CGFloat(dy)), withAttributes: shadow) }
-        s.draw(at: p, withAttributes: attrs)
     }
 
     func bar(y: CGFloat, frac: Double, color: NSColor) {
@@ -1252,18 +1228,18 @@ final class App: NSObject, NSApplicationDelegate {
         let p = world.pet
         let title: String
         if p.dead { title = "🪦 \(p.name)" }
-        else if world.isEgg { title = L("🥚 egg", "🥚 яйцо") }
+        else if world.isEgg { title = "🥚 egg" }
         else { title = "\(p.name) — \(world.species.name)" + (p.form.map { " · \(FORM_NAME[$0]!)" } ?? "") }
         let head = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         head.isEnabled = false
         m.addItem(head)
         m.addItem(.separator())
-        m.addItem(item(L("Stats…", "Статы…"), #selector(statsAction)))
-        m.addItem(item(L("Graveyard", "Кладбище") + " (\(world.save.graves.count))…", #selector(gravesAction)))
-        if p.dead { m.addItem(item(L("Bury and take a new egg 🥚", "Похоронить и взять новое яйцо 🥚"), #selector(reviveAction))) }
-        let size = NSMenuItem(title: L("Size", "Размер"), action: nil, keyEquivalent: "")
+        m.addItem(item("Stats…", #selector(statsAction)))
+        m.addItem(item("Graveyard (\(world.save.graves.count))…", #selector(gravesAction)))
+        if p.dead { m.addItem(item("Bury and take a new egg 🥚", #selector(reviveAction))) }
+        let size = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
         let sub = NSMenu()
-        for (name, v) in [(L("Small", "Маленький"), 0.75), (L("Normal", "Обычный"), 1.0), (L("Large", "Большой"), 1.4)] {
+        for (name, v) in [("Small", 0.75), ("Normal", 1.0), ("Large", 1.4)] {
             let i = item(name, #selector(scaleAction(_:)))
             i.representedObject = v
             i.state = world.save.scale == v ? .on : .off
@@ -1271,17 +1247,17 @@ final class App: NSObject, NSApplicationDelegate {
         }
         size.submenu = sub
         m.addItem(size)
-        let walkItem = item(L("Walk around the screen", "Гулять по экрану"), #selector(roamAction))
+        let walkItem = item("Walk around the screen", #selector(roamAction))
         walkItem.state = roam ? .on : .off
         m.addItem(walkItem)
         if roam && toy == nil && !world.isEgg && !p.dead {
-            m.addItem(item(L("Give a toy 🧶", "Дать игрушку 🧶"), #selector(toyAction)))
+            m.addItem(item("Give a toy 🧶", #selector(toyAction)))
         }
-        let tg = item(L("Telegram alerts", "Пинги в Telegram"), #selector(tgAction))
+        let tg = item("Telegram alerts", #selector(tgAction))
         tg.state = world.save.tg ? .on : .off
         m.addItem(tg)
         m.addItem(.separator())
-        m.addItem(item(L("Quit", "Выйти"), #selector(quitAction)))
+        m.addItem(item("Quit", #selector(quitAction)))
         return m
     }
 
@@ -1308,21 +1284,21 @@ final class App: NSObject, NSApplicationDelegate {
         let ago = Int((now - p.lastFood) / 3600)
         var lines: [String] = []
         if world.isEgg {
-            lines.append(L("Egg: \(Int(p.eggPoints)) of \(Int(HATCH_POINTS)) food to hatch", "Яйцо: \(Int(p.eggPoints)) из \(Int(HATCH_POINTS)) еды до вылупления"))
+            lines.append("Egg: \(Int(p.eggPoints)) of \(Int(HATCH_POINTS)) food to hatch")
         } else {
             let day = Int((now - (p.hatchedAt ?? now)) / 86400) + 1
-            lines.append(L("Species: ", "Вид: ") + world.species.name + (p.form.map { L(", form: ", ", форма: ") + FORM_NAME[$0]! } ?? L(", evolves on day 7", ", эволюция на 7-й день")))
-            lines.append(L("Age: day \(day)", "Возраст: день \(day)"))
-            lines.append(L("Fullness: ", "Сытость: ") + "\(Int(world.full(at: now)))%")
-            if !p.dead { lines.append(L("Starves in: \(max(0, Int(DEATH_HOURS) - ago)) h", "До голодной смерти: \(max(0, Int(DEATH_HOURS) - ago)) ч")) }
+            lines.append("Species: " + world.species.name + (p.form.map { ", form: " + FORM_NAME[$0]! } ?? ", evolves on day 7"))
+            lines.append("Age: day \(day)")
+            lines.append("Fullness: \(Int(world.full(at: now)))%")
+            if !p.dead { lines.append("Starves in: \(max(0, Int(DEATH_HOURS) - ago)) h") }
         }
-        lines.append(L("Last meal: ", "Последняя еда: ") + (ago == 0 ? L("just now", "только что") : L("\(ago) h ago", "\(ago) ч назад")))
-        lines.append(L("Streak: \(world.streak) days in a row", "Стрик: \(world.streak) дн. подряд"))
+        lines.append("Last meal: " + (ago == 0 ? "just now" : "\(ago) h ago"))
+        lines.append("Streak: \(world.streak) days in a row")
         lines.append("")
-        lines.append(L("🍙 prompts", "🍙 промпты") + " \(c["prompt"] ?? 0)   " + L("🍪 finished tasks", "🍪 задачи") + " \(c["done"] ?? 0)")
-        lines.append(L("🍎 edits", "🍎 правки") + " \(c["edit"] ?? 0)   " + L("☕️ commands", "☕️ команды") + " \(c["bash"] ?? 0)")
-        lines.append(L("🐟 web", "🐟 веб") + " \(c["web"] ?? 0)   " + L("🎂 agents", "🎂 агенты") + " \(c["agent"] ?? 0)   " + L("🍬 other", "🍬 прочее") + " \(c["other"] ?? 0)")
-        lines.append(L("Midnight snacks: ", "Ночных перекусов: ") + "\(p.night)")
+        lines.append("🍙 prompts \(c["prompt"] ?? 0)   🍪 finished tasks \(c["done"] ?? 0)")
+        lines.append("🍎 edits \(c["edit"] ?? 0)   ☕️ commands \(c["bash"] ?? 0)")
+        lines.append("🐟 web \(c["web"] ?? 0)   🎂 agents \(c["agent"] ?? 0)   🍬 other \(c["other"] ?? 0)")
+        lines.append("Midnight snacks: \(p.night)")
         alert(p.dead ? "🪦 \(p.name)" : p.name, lines.joined(separator: "\n"))
     }
 
@@ -1330,12 +1306,12 @@ final class App: NSObject, NSApplicationDelegate {
         let g = world.save.graves
         let f = DateFormatter()
         f.dateFormat = "d MMM yyyy"
-        let text = g.isEmpty ? L("Nobody has died yet. Keep it up.", "Пока никто не умер. Так держать.") : g.reversed().map { gr in
+        let text = g.isEmpty ? "Nobody has died yet. Keep it up." : g.reversed().map { gr in
             let sp = SPECIES.first(where: { $0.id == gr.species })?.name ?? gr.species
             let form = gr.form.map { " (\(FORM_NAME[$0] ?? $0))" } ?? ""
-            return "🪦 \(gr.name), \(sp)\(form) — \(gr.days) " + L("days", "дн.") + ", \(f.string(from: Date(timeIntervalSince1970: gr.diedAt)))"
+            return "🪦 \(gr.name), \(sp)\(form) — \(gr.days) days, \(f.string(from: Date(timeIntervalSince1970: gr.diedAt)))"
         }.joined(separator: "\n")
-        alert(L("Graveyard", "Кладбище"), text)
+        alert("Graveyard", text)
     }
 
     @objc func reviveAction() {
