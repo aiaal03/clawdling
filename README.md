@@ -6,7 +6,8 @@ Stop working and it goes hungry. Forget it for two days and it dies.
 <p align="center"><img src="assets/pets.gif" alt="Seven pixel pets: walking, looking for you with a magnifier, celebrating" width="100%"></p>
 
 - **Fed by your work.** Every prompt, file edit, command, web search, subagent and finished task drops food from the sky, and the pet catches it.
-- **Lives on your screen.** It walks along the bottom of the screen, above the Dock, on every Space and over full-screen apps. Drag it to another monitor and it falls to the floor there.
+- **Lives on your screen.** It walks along the bottom of the screen, above the Dock, on every Space and over full-screen apps.
+- **Throw it.** Grab it and fling it: the throw takes your cursor's speed, it falls with real gravity (9.81 m/s² scaled to your display's physical size), tumbles, bounces off the floor, walls and ceiling, and can fly over to the next monitor.
 - **Plays when bored.** It pulls out a ball ⚽️, a ball of yarn 🧶 or chases a butterfly 🦋. You can kick the toy too.
 - **A little assistant.** When Claude finishes a task, it throws a party with poppers and confetti 🎉. When Claude needs your approval, it grabs a magnifying glass and runs to your cursor to find you 🔍.
 - **Grows the way you work.** A random creature hatches from the egg and evolves on day 7 according to how you fed it.
@@ -61,7 +62,7 @@ Each egg hatches into a random **slime, ghost, kitty, fox kit, froglet, crab or 
 ## Using it
 
 - **Click** to pet it ❤️. **Double-click** for stats.
-- **Drag** it anywhere; let go and it drops to the floor.
+- **Drag** it anywhere, or **throw** it: let go while moving and it flies off at your cursor's speed.
 - **Right-click** for the menu: stats, graveyard, size, walking on/off, give a toy, Telegram alerts, quit.
 - Hover over it to see its name and fullness.
 
@@ -85,7 +86,7 @@ The pet then messages you when it starts starving, when less than 6 hours are le
 - The app tails that file, so food earned while it was closed is counted when it starts.
 - State lives in `~/.clawdling/state.json`.
 
-For development: `CLAWDLING_DIR=/tmp/pet ./build/Clawdling.app/Contents/MacOS/Clawdling` runs a separate pet with its own data, `CLAWDLING_SHEET=out.png` renders every species and state into one image, and `CLAWDLING_FRAMES=dir` renders the frames of the GIF above.
+For development: `CLAWDLING_DIR=/tmp/pet ./build/Clawdling.app/Contents/MacOS/Clawdling` runs a separate pet with its own data, `CLAWDLING_SHEET=out.png` renders every species and state into one image, and `CLAWDLING_FRAMES=dir` renders the frames of the GIF above, and `CLAWDLING_THROW="vx,vy"` throws the pet 2 s after launch (points/s) to test the physics.
 
 ## License
 

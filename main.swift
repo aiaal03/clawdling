@@ -381,7 +381,9 @@ final class PetView: NSView {
     var hovering = false, barUntil = 0.0
     var searching = false, celebrateUntil = 0.0
     var onPick: (() -> Void)?
-    var onDrop: (() -> Void)?
+    var onDrop: ((CGVector) -> Void)?
+    var trail: [(t: Double, p: NSPoint)] = []   // recent cursor samples while held
+    var squashAmt: CGFloat = 0.1, spin: CGFloat = 0
     var menuProvider: (() -> NSMenu)?
     var onDoubleClick: (() -> Void)?
 
@@ -450,6 +452,7 @@ final class PetView: NSView {
             mouthUntil = t + 0.35
             barUntil = t + 4
             squashUntil = t + 0.18
+            squashAmt = 0.1
         }
         drops.removeAll { $0.y >= target }
         for i in particles.indices {
@@ -509,11 +512,12 @@ final class PetView: NSView {
         let party = t < celebrateUntil && m != "dead" && m != "egg"
         let closed = party || m == "sleep" || t < blinkUntil || m == "starving" && Int(t) % 4 == 0
         let open = party || t < mouthUntil
-        let squash: CGFloat = t < squashUntil ? 0.9 : (m == "starving" ? 0.86 : 1)
+        let squash: CGFloat = t < squashUntil ? 1 - squashAmt * CGFloat((squashUntil - t) / 0.22).squareRoot() : (m == "starving" ? 0.86 : 1)
         var wobble: CGFloat = 0
         if t < wobbleUntil { wobble = CGFloat(sin((wobbleUntil - t) * 30)) * 0.08 }
         if walking { wobble += lean * 0.07 + CGFloat(sin(t * 11)) * 0.05 }
         if held { wobble = CGFloat(sin(t * 5)) * 0.12 }
+        wobble += spin
 
         ctx.saveGState()
         let baseX = SPRITE_X + 8 * CELL, baseY = SPRITE_Y + 16 * CELL
@@ -705,21 +709,32 @@ final class PetView: NSView {
         dragStart = NSEvent.mouseLocation
         winStart = window?.frame.origin
         dragged = false
+        trail = [(e.timestamp, dragStart!)]
         if e.clickCount == 2 { onDoubleClick?() }
     }
 
     override func mouseDragged(with e: NSEvent) {
         guard let s = dragStart, let o = winStart, let win = window else { return }
         let p = NSEvent.mouseLocation
-        if !dragged && abs(p.x - s.x) + abs(p.y - s.y) > 3 { dragged = true; held = true; onPick?() }
+        if !dragged && abs(p.x - s.x) + abs(p.y - s.y) > 3 { dragged = true; held = true; spin = 0; onPick?() }
         win.setFrameOrigin(NSPoint(x: o.x + p.x - s.x, y: o.y + p.y - s.y))
+        trail.append((e.timestamp, p))
+        trail.removeAll { e.timestamp - $0.t > 0.12 }
+    }
+
+    /// Cursor velocity (points/s) over the last ~80 ms; zero if the hand stopped before letting go.
+    func throwVelocity(at now: Double) -> CGVector {
+        let recent = trail.filter { now - $0.t < 0.08 }
+        guard let a = recent.first, let b = recent.last, b.t - a.t > 0.008 else { return .zero }
+        let dt = CGFloat(b.t - a.t)
+        return CGVector(dx: (b.p.x - a.p.x) / dt, dy: (b.p.y - a.p.y) / dt)
     }
 
     override func mouseUp(with e: NSEvent) {
         if dragged {
             held = false
             window?.saveFrame(usingName: "ClawdlingWindow")
-            onDrop?()
+            onDrop?(throwVelocity(at: e.timestamp))
         } else if e.clickCount == 1 {
             pet()
         }
@@ -733,8 +748,10 @@ final class PetView: NSView {
     override func mouseEntered(with e: NSEvent) { hovering = true }
     override func mouseExited(with e: NSEvent) { hovering = false }
 
-    func land() {
+    /// Squash on impact; `strength` 0…1 from the landing speed.
+    func land(_ strength: CGFloat = 0.5) {
         squashUntil = t + 0.22
+        squashAmt = 0.08 + 0.3 * min(1, strength)
     }
 
     override func rightMouseDown(with e: NSEvent) {
@@ -790,13 +807,15 @@ final class Toy {
         panel.orderFront(nil)
     }
 
+    var g: CGFloat = 1300
+
     func kick(dir: CGFloat) {
         if kind == "butterfly" {
             vx = dir * CGFloat.random(in: 140...240)
             phase += 2
         } else {
             vx = dir * CGFloat.random(in: 260...480)
-            vy = CGFloat.random(in: 140...360)
+            vy = (2 * g * CGFloat.random(in: 8...60)).squareRoot()   // hop 8–60 pt high
         }
     }
 
@@ -809,11 +828,11 @@ final class Toy {
             y = 70 + CGFloat(sin(t * 1.7 + phase)) * 40 + CGFloat(sin(t * 9)) * 4
             view.angle = CGFloat(sin(t * 9)) * 0.15
         } else {
-            vy -= 1300 * dt
+            vy -= g * dt
             y += vy * dt
             if y <= 0 {
                 y = 0
-                vy = abs(vy) > 90 ? -vy * 0.45 : 0
+                vy = abs(vy) > (2 * g * 2).squareRoot() ? -vy * 0.55 : 0
             }
             vx *= pow(y > 0 ? 0.85 : 0.35, dt)
             if abs(vx) < 4 { vx = 0 }
@@ -927,7 +946,10 @@ final class App: NSObject, NSApplicationDelegate {
     var act = "fall"            // idle, walk, play, fall
     var actUntil = 0.0
     var targetX: CGFloat = 0    // target for the pet's center (screen coordinates)
-    var air: CGFloat = 0, vy: CGFloat = 0
+    var air: CGFloat = 0, vy: CGFloat = 0, vx: CGFloat = 0
+    var lastFloor: CGFloat?
+    var G: CGFloat = 40000      // gravity in points/s², set from the screen's physical size
+    var spinRate: CGFloat = 0
     var toy: Toy?
     var playUntil = 0.0
     var lastPlay = ProcessInfo.processInfo.environment["CLAWDLING_PLAY"] != nil ? 0 : Date().timeIntervalSince1970 - 30
@@ -958,15 +980,33 @@ final class App: NSObject, NSApplicationDelegate {
 
         world.onFood = { [weak self] e, p in self?.view.enqueue(e, p) }
         world.onAsk = { [weak self] in self?.startSearch() }
+        // Debug: CLAWDLING_THROW="vx,vy" throws the pet from mid-screen 2 s after launch (points/s).
+        if let th = ProcessInfo.processInfo.environment["CLAWDLING_THROW"] {
+            let v = th.split(separator: ",").compactMap { Double($0) }
+            Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+                guard let self, v.count == 2 else { return }
+                let vis = self.floorInfo().0
+                self.panel.setFrameOrigin(NSPoint(x: vis.midX - W / 2, y: vis.minY + 300))
+                self.view.onDrop?(CGVector(dx: v[0], dy: v[1]))
+                NSLog("clawdling throw G=%.0f", self.G)
+            }
+        }
         world.onActivity = { [weak self] in self?.stopSearch() }
         world.onDone = { [weak self] in self?.celebrate() }
         view.menuProvider = { [weak self] in self?.makeMenu() ?? NSMenu() }
         view.onDoubleClick = { [weak self] in self?.showStats() }
-        view.onPick = { [weak self] in self?.act = "fall" }
-        view.onDrop = { [weak self] in
+        view.onPick = { [weak self] in self?.act = "fall"; self?.vx = 0; self?.vy = 0 }
+        view.onDrop = { [weak self] v in
             guard let self else { return }
-            self.air = max(0, self.panel.frame.origin.y - self.floorInfo().1)
-            self.vy = 0
+            let floor = self.floorInfo().1
+            self.lastFloor = floor
+            self.air = max(0, self.panel.frame.origin.y - floor)
+            // throw: the cursor's velocity at release, capped at 12 m/s
+            let cap = 12 * self.G / 9.81
+            let sp = hypot(v.dx, v.dy), k = sp > cap ? cap / sp : 1
+            self.vx = v.dx * k
+            self.vy = v.dy * k
+            self.spinRate = -self.vx / 900
             self.act = "fall"
         }
 
@@ -1003,24 +1043,74 @@ final class App: NSObject, NSApplicationDelegate {
         return (scr.visibleFrame, scr.visibleFrame.minY)
     }
 
+    /// Real gravity: 9.81 m/s² in points of the screen the pet is on (from its physical size).
+    func gravity(for vis: NSRect) -> CGFloat {
+        let c = NSPoint(x: vis.midX, y: vis.midY)
+        guard let scr = NSScreen.screens.first(where: { $0.frame.contains(c) }),
+              let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return 40000 }
+        let mm = CGDisplayScreenSize(id).width
+        guard mm > 50 else { return 40000 }
+        return min(80000, max(15000, 9.81 * scr.frame.width / (mm / 1000)))
+    }
+
+    /// Velocity that lifts the pet `h` points (scaled with the pet's size).
+    func hop(_ h: CGFloat) -> CGFloat { (2 * G * h * CGFloat(world.save.scale)).squareRoot() }
+
+    /// Is there a screen at this x (near this height)? Lets a throw carry the pet to the next monitor.
+    func screenExists(x: CGFloat, y: CGFloat) -> Bool {
+        NSScreen.screens.contains { $0.frame.minX <= x && x <= $0.frame.maxX && $0.frame.minY - 200 <= y && y <= $0.frame.maxY + 200 }
+    }
+
     func roamStep(dt: CGFloat, now: Double) {
         guard roam, !view.held else { view.walking = false; return }
         let s = CGFloat(world.save.scale)
         let (vis, floor) = floorInfo()
+        G = gravity(for: vis)
+        toy?.g = G
+        // keep the height absolute when the floor changes (moved to another screen)
+        if let lf = lastFloor, lf != floor { air += lf - floor }
+        lastFloor = floor
         let half = W / 2 * s
         let minC = vis.minX + 40 * s, maxC = vis.maxX - 40 * s   // bounds for the pet's center
         var cx = panel.frame.origin.x + half
 
-        // gravity
-        if air > 0 || vy > 0 {
-            vy -= 1500 * dt
+        // gravity, flight and bounces
+        let flying = air > 0 || vy > 0 || vx != 0
+        if flying {
+            vy -= G * dt
+            vx *= pow(0.92, dt)                         // a little air drag
             air += vy * dt
+            cx += vx * dt
+            spinRate *= pow(0.6, dt)
+            view.spin += spinRate * dt * 60 * 0.05
+            // walls and ceiling of this screen; open sides lead to the next monitor
+            let edgeL = vis.minX + 40 * s, edgeR = vis.maxX - 40 * s
+            if cx < edgeL && !screenExists(x: cx - 60 * s, y: floor + air) { cx = edgeL; vx = abs(vx) * 0.5; spinRate = -spinRate }
+            if cx > edgeR && !screenExists(x: cx + 60 * s, y: floor + air) { cx = edgeR; vx = -abs(vx) * 0.5; spinRate = -spinRate }
+            let ceiling = vis.maxY - floor - H * s
+            if air > ceiling && vy > 0 { air = ceiling; vy = -vy * 0.4 }
             if air <= 0 {
                 air = 0
-                if vy < -350 { view.land() }
-                vy = 0
-                if act == "fall" { act = "idle"; actUntil = now + 1.5 }
+                let impact = -vy
+                if impact > 0 {
+                    // bounce: restitution 0.55 for a soft creature; tiny bounces die out
+                    view.land(impact / hop(220))
+                    view.spin = atan2(sin(view.spin), cos(view.spin))   // land upright-ish, then settle
+                    spinRate *= 0.4
+                    vy = impact > hop(3) ? impact * 0.55 : 0
+                    vx *= 0.75
+                }
+                if vy == 0 {
+                    // sliding on the floor: friction μ≈0.5
+                    let f = 0.5 * G * dt
+                    vx = abs(vx) <= f ? 0 : vx - (vx > 0 ? f : -f)
+                    view.spin *= pow(0.001, dt)
+                    if vx == 0 { view.spin = 0 }
+                }
+                if vy == 0 && vx == 0 && act == "fall" { act = "idle"; actUntil = now + 1.5 }
             }
+        } else if view.spin != 0 {
+            view.spin = 0
         }
         view.air = air
 
@@ -1032,7 +1122,7 @@ final class App: NSObject, NSApplicationDelegate {
         for c in confetti { c.step(dt) }
         confetti.removeAll { if $0.isDone { $0.close(); return true }; return false }
         let partying = view.t < view.celebrateUntil
-        if partying && air == 0 && vy == 0 && m != "dead" && m != "egg" { vy = 430 }
+        if partying && air == 0 && vy == 0 && m != "dead" && m != "egg" { vy = hop(62) }
         view.walking = false
 
         if view.searching && m != "dead" && m != "egg" && m != "starving" && act != "fall" {
@@ -1046,7 +1136,7 @@ final class App: NSObject, NSApplicationDelegate {
             }
             if walk(&cx, to: targetX, speed: 120 * s, dt: dt) || abs(targetX - cx) < 30 * s {
                 view.lean = mouse.x >= cx ? 1 : -1
-                if mine && air == 0 && now > nextSearchHop { vy = 300; nextSearchHop = now + 1.1 }
+                if mine && air == 0 && now > nextSearchHop { vy = hop(30); nextSearchHop = now + 1.1 }
             }
         } else if canMove && !partying {
             switch act {
@@ -1064,10 +1154,10 @@ final class App: NSObject, NSApplicationDelegate {
                     if abs(d) > 22 * s { _ = walk(&cx, to: toy.x, speed: 95 * s, dt: dt) }
                     if abs(d) < 34 * s && now - lastKick > 0.6 {
                         if toy.kind == "butterfly" {
-                            if air == 0 { vy = 520; toy.kick(dir: Bool.random() ? 1 : -1); lastKick = now }
+                            if air == 0 { vy = hop(90); toy.kick(dir: Bool.random() ? 1 : -1); lastKick = now }
                         } else if toy.y < 30 {
                             toy.kick(dir: d >= 0 ? 1 : -1)
-                            if air == 0 && Bool.random() { vy = 260 }
+                            if air == 0 && Bool.random() { vy = hop(22) }
                             lastKick = now
                         }
                     }
@@ -1078,7 +1168,7 @@ final class App: NSObject, NSApplicationDelegate {
                 act = "idle"
             }
         }
-        cx = min(max(cx, minC), maxC)
+        if !flying { cx = min(max(cx, minC), maxC) }
         toy?.step(dt: dt, t: view.t, floor: floor, minX: vis.minX, maxX: vis.maxX)
         panel.setFrameOrigin(NSPoint(x: cx - half, y: floor + air - 2 * s))
     }
