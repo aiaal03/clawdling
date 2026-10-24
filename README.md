@@ -7,7 +7,7 @@ Stop working and it goes hungry. Forget it for two days and it dies.
 
 - **Fed by your work.** Every prompt, file edit, command, web search, subagent and finished task drops food from the sky, and the pet catches it.
 - **Lives on your screen.** It walks along the bottom of the screen, above the Dock, on every Space and over full-screen apps.
-- **Throw it.** Grab it and fling it: the throw takes your cursor's speed, it falls with real gravity (9.81 m/s² scaled to your display's physical size), tumbles, bounces off the floor, walls and ceiling, and can fly over to the next monitor.
+- **Throw it.** Grab it and fling it: the throw takes your cursor's speed, it falls with gravity, tumbles, bounces off the floor, walls and ceiling, and can fly over to the next monitor.
 - **Plays when bored.** It pulls out a ball ⚽️, a ball of yarn 🧶 or chases a butterfly 🦋. You can kick the toy too.
 - **A little assistant.** When Claude finishes a task, it throws a party with poppers and confetti 🎉. When Claude needs your approval, it grabs a magnifying glass and runs to your cursor to find you 🔍.
 - **Grows the way you work.** A random creature hatches from the egg and evolves on day 7 according to how you fed it.

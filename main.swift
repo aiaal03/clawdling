@@ -948,7 +948,7 @@ final class App: NSObject, NSApplicationDelegate {
     var targetX: CGFloat = 0    // target for the pet's center (screen coordinates)
     var air: CGFloat = 0, vy: CGFloat = 0, vx: CGFloat = 0
     var lastFloor: CGFloat?
-    var G: CGFloat = 40000      // gravity in points/s², set from the screen's physical size
+    var G: CGFloat = 4200       // gravity in points/s²
     var spinRate: CGFloat = 0
     var toy: Toy?
     var playUntil = 0.0
@@ -980,15 +980,18 @@ final class App: NSObject, NSApplicationDelegate {
 
         world.onFood = { [weak self] e, p in self?.view.enqueue(e, p) }
         world.onAsk = { [weak self] in self?.startSearch() }
-        // Debug: CLAWDLING_THROW="vx,vy" throws the pet from mid-screen 2 s after launch (points/s).
+        // Debug: CLAWDLING_THROW="vx,vy[,x,y]" throws the pet 2 s after launch (points/s), from mid-screen or a global point.
         if let th = ProcessInfo.processInfo.environment["CLAWDLING_THROW"] {
             let v = th.split(separator: ",").compactMap { Double($0) }
             Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
-                guard let self, v.count == 2 else { return }
-                let vis = self.floorInfo().0
-                self.panel.setFrameOrigin(NSPoint(x: vis.midX - W / 2, y: vis.minY + 300))
+                guard let self, v.count >= 2 else { return }
+                if v.count == 4 {   // "vx,vy,x,y": start from this global point
+                    self.panel.setFrameOrigin(NSPoint(x: v[2] - W / 2, y: v[3]))
+                } else {
+                    let vis = self.floorInfo().0
+                    self.panel.setFrameOrigin(NSPoint(x: vis.midX - W / 2, y: vis.minY + 300))
+                }
                 self.view.onDrop?(CGVector(dx: v[0], dy: v[1]))
-                NSLog("clawdling throw G=%.0f", self.G)
             }
         }
         world.onActivity = { [weak self] in self?.stopSearch() }
@@ -1001,8 +1004,8 @@ final class App: NSObject, NSApplicationDelegate {
             let floor = self.floorInfo().1
             self.lastFloor = floor
             self.air = max(0, self.panel.frame.origin.y - floor)
-            // throw: the cursor's velocity at release, capped at 12 m/s
-            let cap = 12 * self.G / 9.81
+            // throw: the cursor's velocity at release, capped so it peaks at most ~1600 pt up
+            let cap = (2 * self.G * 1600).squareRoot()
             let sp = hypot(v.dx, v.dy), k = sp > cap ? cap / sp : 1
             self.vx = v.dx * k
             self.vy = v.dy * k
@@ -1035,23 +1038,24 @@ final class App: NSObject, NSApplicationDelegate {
 
     // MARK: walking
 
+    /// The floor under the pet's feet: among the screens at its x, the highest floor that is not above the feet.
+    /// Stacked monitors therefore act as solid floors and the pet can never fall through a screen edge.
     func floorInfo() -> (NSRect, CGFloat) {
-        let c = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        let scr = NSScreen.screens.first { $0.frame.contains(c) } ?? NSScreen.screens.min {
-            hypot($0.frame.midX - c.x, $0.frame.midY - c.y) < hypot($1.frame.midX - c.x, $1.frame.midY - c.y)
-        } ?? NSScreen.main!
+        let s = CGFloat(world.save.scale)
+        let cx = panel.frame.midX, feet = panel.frame.minY + 2 * s
+        let column = NSScreen.screens.filter { $0.frame.minX <= cx && cx <= $0.frame.maxX }
+        let below = column.filter { $0.visibleFrame.minY <= feet + 4 }
+        let scr = below.max { $0.visibleFrame.minY < $1.visibleFrame.minY }
+            ?? column.min { $0.visibleFrame.minY < $1.visibleFrame.minY }
+            ?? NSScreen.screens.min { abs($0.frame.midX - cx) < abs($1.frame.midX - cx) }
+            ?? NSScreen.main!
         return (scr.visibleFrame, scr.visibleFrame.minY)
     }
 
-    /// Real gravity: 9.81 m/s² in points of the screen the pet is on (from its physical size).
-    func gravity(for vis: NSRect) -> CGFloat {
-        let c = NSPoint(x: vis.midX, y: vis.midY)
-        guard let scr = NSScreen.screens.first(where: { $0.frame.contains(c) }),
-              let id = scr.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return 40000 }
-        let mm = CGDisplayScreenSize(id).width
-        guard mm > 50 else { return 40000 }
-        return min(80000, max(15000, 9.81 * scr.frame.width / (mm / 1000)))
-    }
+
+    /// Cartoon gravity: real 9.81 m/s² at screen scale made a 3 cm pet drop like a stone,
+    /// so the world is scaled up — the pet falls like a small animal, not a pebble.
+    func gravity() -> CGFloat { 4200 * CGFloat(world.save.scale) }
 
     /// Velocity that lifts the pet `h` points (scaled with the pet's size).
     func hop(_ h: CGFloat) -> CGFloat { (2 * G * h * CGFloat(world.save.scale)).squareRoot() }
@@ -1065,7 +1069,7 @@ final class App: NSObject, NSApplicationDelegate {
         guard roam, !view.held else { view.walking = false; return }
         let s = CGFloat(world.save.scale)
         let (vis, floor) = floorInfo()
-        G = gravity(for: vis)
+        G = gravity()
         toy?.g = G
         // keep the height absolute when the floor changes (moved to another screen)
         if let lf = lastFloor, lf != floor { air += lf - floor }
