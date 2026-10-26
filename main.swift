@@ -104,14 +104,96 @@ struct Sprite {
     }
 }
 
+var emojiCache: [String: NSImage] = [:]
+/// An emoji rendered once into an image; drawing text every frame was the costliest part of a frame.
+func emojiImage(_ e: String, size: CGFloat) -> NSImage {
+    let key = "\(e)@\(size)"
+    if let img = emojiCache[key] { return img }
+    let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size)]
+    let sz = (e as NSString).size(withAttributes: a)
+    let img = NSImage(size: sz, flipped: true) { _ in (e as NSString).draw(at: .zero, withAttributes: a); return true }
+    emojiCache[key] = img
+    return img
+}
+
+/// Draws a cached emoji with its top-left at `p` (flipped views) or bottom-left (unflipped).
+func drawEmoji(_ e: String, size: CGFloat, at p: NSPoint, alpha: CGFloat = 1) {
+    let img = emojiImage(e, size: size)
+    img.draw(in: NSRect(origin: p, size: img.size), from: .zero, operation: .sourceOver, fraction: alpha,
+             respectFlipped: true, hints: nil)
+}
+
+var spriteImages: [String: NSImage] = [:]
+/// The pet's body for one look (eyes open/closed/happy, mouth, starving grey) as a 16×16 pixel image,
+/// built once; drawing ~150 cells one by one every frame was most of the app's CPU.
+func spriteImage(rows: [String], sprite: Sprite, pal: [Character: NSColor], palKey: String,
+                 closed: Bool, party: Bool, open: Bool, grey: Bool) -> NSImage {
+    let key = "\(rows.count)\(rows[2])\(rows[7])\(palKey)\(closed)\(party)\(open)\(grey)"
+    if let img = spriteImages[key] { return img }
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 16, pixelsHigh: 16, bitsPerSample: 8,
+                               samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    let bytes = rep.bitmapData!, stride = rep.bytesPerRow
+    memset(bytes, 0, stride * 16)
+    func put(_ r: Int, _ c: Int, _ col: NSColor) {
+        guard (0..<16).contains(r + 2), (0..<16).contains(c),
+              let k = (grey ? greyed(col) : col).usingColorSpace(.sRGB) else { return }
+        let a = k.alphaComponent, o = (r + 2) * stride + c * 4   // premultiplied RGBA
+        bytes[o] = UInt8(k.redComponent * a * 255); bytes[o + 1] = UInt8(k.greenComponent * a * 255)
+        bytes[o + 2] = UInt8(k.blueComponent * a * 255); bytes[o + 3] = UInt8(a * 255)
+    }
+    let maxEyeRow = sprite.eyes.map { $0.0 }.max() ?? 0
+    for (r, row) in sprite.grid.enumerated() {
+        for (c, ch) in row.enumerated() where ch != "." {
+            var k = ch
+            if (ch == "e" || ch == "w") && party { k = r == maxEyeRow ? "b" : "e" }
+            else if (ch == "e" || ch == "w") && closed { k = r == maxEyeRow ? "o" : "b" }
+            if let col = pal[k] { put(r, c, col) }
+            if ch == "m" && open && r + 1 < sprite.grid.count { put(r + 1, c, hex(0x5b2433)) }
+        }
+    }
+    if party {
+        // happy ^^ eyes: legs at the outer edges of each eye
+        for side in [sprite.eyes.filter { $0.1 < 8 }, sprite.eyes.filter { $0.1 >= 8 }] where !side.isEmpty {
+            for c in [side.map { $0.1 }.min()! - 1, side.map { $0.1 }.max()! + 1] { put(maxEyeRow, c, pal["e"]!) }
+        }
+    }
+    let img = NSImage(size: NSSize(width: 16, height: 16))
+    img.addRepresentation(rep.retagging(with: .sRGB) ?? rep)
+    spriteImages[key] = img
+    return img
+}
+
+var greyCache: [NSColor: NSColor] = [:]
+/// A colour washed towards grey (the starving look), cached.
+func greyed(_ c: NSColor) -> NSColor {
+    if let g = greyCache[c] { return g }
+    let g = (c.blended(withFraction: 0.55, of: hex(0x8a8a8a)) ?? c).withAlphaComponent(c.alphaComponent)
+    greyCache[c] = g
+    return g
+}
+
+var spriteCache: [String: Sprite] = [:]
+/// Parsed sprite for these rows, built once.
+func sprite(_ rows: [String]) -> Sprite {
+    let key = rows.joined(separator: "|")
+    if let s = spriteCache[key] { return s }
+    let s = Sprite(rows)
+    spriteCache[key] = s
+    return s
+}
+
 func hex(_ v: Int, _ a: CGFloat = 1) -> NSColor {
     NSColor(srgbRed: CGFloat((v >> 16) & 255) / 255, green: CGFloat((v >> 8) & 255) / 255,
             blue: CGFloat(v & 255) / 255, alpha: a)
 }
 
+var paletteCache: [String: [Character: NSColor]] = [:]
 func palette(body b: Int, accent: Int, light: Int?, outline: Int?, mouth: Int?) -> [Character: NSColor] {
+    let key = "\(b) \(accent) \(light ?? -1) \(outline ?? -1) \(mouth ?? -1)"
+    if let p = paletteCache[key] { return p }
     let body = hex(b)
-    return [
+    let p: [Character: NSColor] = [
         "b": body,
         "o": outline.map { hex($0) } ?? body.blended(withFraction: 0.68, of: .black)!,
         "l": light.map { hex($0) } ?? body.blended(withFraction: 0.5, of: .white)!,
@@ -120,6 +202,8 @@ func palette(body b: Int, accent: Int, light: Int?, outline: Int?, mouth: Int?) 
         "m": mouth.map { hex($0) } ?? hex(0x5b2433),
         "a": hex(accent),
     ]
+    paletteCache[key] = p
+    return p
 }
 
 // MARK: - State
@@ -354,8 +438,10 @@ final class World {
 struct Drop { var emoji: String; var x: CGFloat; var y: CGFloat; var vy: CGFloat; var pts: Double }
 struct Particle { var text: String; var x: CGFloat; var y: CGFloat; var vy: CGFloat; var vx: CGFloat; var life: Double; var size: CGFloat; var color: NSColor }
 
-let W: CGFloat = 200, H: CGFloat = 232, CELL: CGFloat = 6
-let SPRITE_X = (W - 16 * CELL) / 2, SPRITE_Y: CGFloat = H - 4 - 16 * CELL   // top of the 16×16 canvas; feet at the window's bottom edge
+let W: CGFloat = 200, CELL: CGFloat = 6
+let FOOT_PAD: CGFloat = 36                        // room under the feet: a pet spinning mid-air stays inside its window
+let H: CGFloat = 228 + FOOT_PAD
+let SPRITE_X = (W - 16 * CELL) / 2, SPRITE_Y: CGFloat = H - FOOT_PAD - 16 * CELL   // top of the 16×16 canvas
 
 final class PetView: NSView {
     let world: World
@@ -395,7 +481,7 @@ final class PetView: NSView {
     }
 
     var mouthY: CGFloat {
-        let sp = Sprite(world.species.rows)
+        let sp = sprite(world.species.rows)
         return SPRITE_Y + CGFloat(sp.mouthRow + 2) * CELL + bob
     }
 
@@ -486,18 +572,22 @@ final class PetView: NSView {
         // sprite
         var rows: [String]
         var pal: [Character: NSColor]
+        var palKey = ""
         let sp = w.species
         if m == "dead" {
             rows = TOMB_ROWS
+            palKey = "tomb"
             pal = palette(body: 0xaeb0bb, accent: 0x6fbf5a, light: nil, outline: 0x5d5f6b, mouth: nil)
         } else if m == "egg" {
             rows = EGG_ROWS
+            palKey = "egg\(w.pet.species)\(w.pet.colorIndex)"
             pal = palette(body: 0xfbf4e4, accent: sp.colors[w.pet.colorIndex % sp.colors.count], light: nil, outline: 0x8a7f6a, mouth: nil)
         } else {
             rows = sp.rows
+            palKey = "\(sp.id)\(w.pet.colorIndex)"
             pal = palette(body: sp.colors[w.pet.colorIndex % sp.colors.count], accent: sp.accent, light: sp.light, outline: sp.outline, mouth: sp.mouth)
         }
-        let sprite = Sprite(rows)
+        let sprite = sprite(rows)
         let grey = m == "starving"
         let party = t < celebrateUntil && m != "dead" && m != "egg"
         let closed = party || m == "sleep" || t < blinkUntil || m == "starving" && Int(t) % 4 == 0
@@ -507,39 +597,24 @@ final class PetView: NSView {
         if t < wobbleUntil { wobble = CGFloat(sin((wobbleUntil - t) * 30)) * 0.08 }
         if walking { wobble += lean * 0.07 + CGFloat(sin(t * 11)) * 0.05 }
         if held { wobble = CGFloat(sin(t * 5)) * 0.12 }
-        wobble += spin
 
         ctx.saveGState()
         let baseX = SPRITE_X + 8 * CELL, baseY = SPRITE_Y + 16 * CELL
-        ctx.translateBy(x: baseX, y: baseY + bob)
+        // the mid-air tumble turns around the body's middle; sways and wobbles pivot on the feet
+        ctx.translateBy(x: baseX, y: SPRITE_Y + 9 * CELL + bob)
+        ctx.setShouldAntialias(spin != 0 || wobble != 0)
+        ctx.rotate(by: spin)
+        ctx.translateBy(x: 0, y: baseY - (SPRITE_Y + 9 * CELL))
         ctx.rotate(by: wobble)
         ctx.scaleBy(x: 2 - squash, y: squash)
         ctx.translateBy(x: -8 * CELL, y: -16 * CELL)
 
-        let maxEyeRow = sprite.eyes.map { $0.0 }.max() ?? 0
-        for (r, row) in sprite.grid.enumerated() {
-            for (c, ch) in row.enumerated() where ch != "." {
-                var key = ch
-                if (ch == "e" || ch == "w") && party { key = r == maxEyeRow ? "b" : "e" }
-                else if (ch == "e" || ch == "w") && closed { key = r == maxEyeRow ? "o" : "b" }
-                guard var col = pal[key] else { continue }
-                if grey { col = (col.blended(withFraction: 0.55, of: hex(0x8a8a8a)) ?? col).withAlphaComponent(col.alphaComponent) }
-                col.setFill()
-                NSRect(x: CGFloat(c) * CELL - 0.3, y: CGFloat(r + 2) * CELL - 0.3, width: CELL + 0.6, height: CELL + 0.6).fill(using: .sourceOver)
-                if ch == "m" && open && r + 1 < sprite.grid.count {
-                    hex(0x5b2433).setFill()
-                    NSRect(x: CGFloat(c) * CELL, y: CGFloat(r + 3) * CELL, width: CELL, height: CELL).fill()
-                }
-            }
-        }
-        if party {
-            // happy ^^ eyes: legs at the outer edges of each eye
-            pal["e"]!.setFill()
-            for side in [sprite.eyes.filter { $0.1 < 8 }, sprite.eyes.filter { $0.1 >= 8 }] where !side.isEmpty {
-                let r = maxEyeRow, c0 = side.map { $0.1 }.min()! - 1, c1 = side.map { $0.1 }.max()! + 1
-                for c in [c0, c1] { NSRect(x: CGFloat(c) * CELL, y: CGFloat(r + 2) * CELL, width: CELL, height: CELL).fill() }
-            }
-        }
+        // the whole body is one cached 16×16 image, scaled up with no smoothing
+        let img = spriteImage(rows: rows, sprite: sprite, pal: pal, palKey: palKey,
+                              closed: closed, party: party, open: open, grey: grey)
+        NSGraphicsContext.current?.imageInterpolation = .none
+        img.draw(in: NSRect(x: 0, y: 0, width: 16 * CELL, height: 16 * CELL), from: .zero,
+                 operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         if let form = w.pet.form, m != "dead", m != "egg" { drawForm(form, sprite, pal) }
         ctx.restoreGState()
 
@@ -547,13 +622,11 @@ final class PetView: NSView {
 
         // food
         for d in drops {
-            (d.emoji as NSString).draw(at: NSPoint(x: d.x, y: d.y), withAttributes: [.font: NSFont.systemFont(ofSize: 20)])
+            drawEmoji(d.emoji, size: 20, at: NSPoint(x: d.x, y: d.y))
         }
         // particles
         for p in particles {
-            let a = CGFloat(min(1, p.life * 1.5))
-            (p.text as NSString).draw(at: NSPoint(x: p.x, y: p.y), withAttributes: [
-                .font: NSFont.boldSystemFont(ofSize: p.size), .foregroundColor: p.color.withAlphaComponent(a)])
+            drawEmoji(p.text, size: p.size, at: NSPoint(x: p.x, y: p.y), alpha: CGFloat(min(1, p.life * 1.5)))
         }
         // health bar
         drawBar(m)
@@ -658,7 +731,7 @@ final class PetView: NSView {
         // just the health bar: after a meal, on hover, or while hungry; no text
         let w = world
         guard m != "dead" else { return }
-        let top = CGFloat(Sprite(m == "egg" ? EGG_ROWS : w.species.rows).top)
+        let top = CGFloat(sprite(m == "egg" ? EGG_ROWS : w.species.rows).top)
         let y = SPRITE_Y + top * CELL - 14 + bob
         let hungry = !w.isEgg && w.full(at: now) < 30
         guard hovering || t < barUntil || hungry else { return }
@@ -748,9 +821,9 @@ final class ToyView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.translateBy(x: bounds.midX, y: bounds.midY)
         ctx.rotate(by: angle)
-        let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: bounds.width * 0.62)]
-        let sz = (emoji as NSString).size(withAttributes: a)
-        (emoji as NSString).draw(at: NSPoint(x: -sz.width / 2, y: -sz.height / 2), withAttributes: a)
+        let img = emojiImage(emoji, size: bounds.width * 0.62)
+        img.draw(in: NSRect(x: -img.size.width / 2, y: -img.size.height / 2, width: img.size.width, height: img.size.height),
+                 from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
     override func mouseDown(with e: NSEvent) { onKick?() }
 }
@@ -924,6 +997,8 @@ final class App: NSObject, NSApplicationDelegate {
     var targetX: CGFloat = 0    // target for the pet's center (screen coordinates)
     var air: CGFloat = 0, vy: CGFloat = 0, vx: CGFloat = 0
     var lastFloor: CGFloat?
+    /// Height of the pet's feet above the window's bottom edge.
+    var footOffset: CGFloat { (FOOT_PAD - 2) * CGFloat(world.save.scale) }
     var G: CGFloat = 4200       // gravity in points/s²
     var spinRate: CGFloat = 0
     var toy: Toy?
@@ -947,6 +1022,7 @@ final class App: NSObject, NSApplicationDelegate {
         panel.hidesOnDeactivate = false
         panel.isMovable = false
         panel.contentView = view
+        panel.depthLimit = .twentyfourBitRGB   // 8-bit colour; an HDR (16-bit) buffer doubled every fill
         applyScale()
         if !panel.setFrameUsingName("ClawdlingWindow"), let s = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: s.maxX - panel.frame.width - 40, y: s.minY + 30))
@@ -979,7 +1055,7 @@ final class App: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let floor = self.floorInfo().1
             self.lastFloor = floor
-            self.air = max(0, self.panel.frame.origin.y - floor)
+            self.air = max(0, self.panel.frame.origin.y + self.footOffset - 2 * CGFloat(self.world.save.scale) - floor)
             // throw: the cursor's velocity at release, capped so it peaks at most ~1600 pt up
             let cap = (2 * self.G * 1600).squareRoot()
             let sp = hypot(v.dx, v.dy), k = sp > cap ? cap / sp : 1
@@ -994,13 +1070,12 @@ final class App: NSObject, NSApplicationDelegate {
         world.tick(now: now)
         world.persist()
 
-        Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let t = Date().timeIntervalSince1970
-            let dt = min(0.1, t - self.lastStep)
-            self.roamStep(dt: CGFloat(dt), now: t)
-            self.view.step(dt: dt)
-            self.lastStep = t
+        if #available(macOS 14, *) {
+            // display-synced frames (100/120 Hz on ProMotion and fast monitors)
+            let link = view.displayLink(target: self, selector: #selector(onDisplayFrame(_:)))
+            link.add(to: .main, forMode: .common)
+        } else {
+            Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.frame() }
         }
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -1017,8 +1092,7 @@ final class App: NSObject, NSApplicationDelegate {
     /// The floor under the pet's feet: among the screens at its x, the highest floor that is not above the feet.
     /// Stacked monitors therefore act as solid floors and the pet can never fall through a screen edge.
     func floorInfo() -> (NSRect, CGFloat) {
-        let s = CGFloat(world.save.scale)
-        let cx = panel.frame.midX, feet = panel.frame.minY + 2 * s
+        let cx = panel.frame.midX, feet = panel.frame.minY + footOffset
         let column = NSScreen.screens.filter { $0.frame.minX <= cx && cx <= $0.frame.maxX }
         let below = column.filter { $0.visibleFrame.minY <= feet + 4 }
         let scr = below.max { $0.visibleFrame.minY < $1.visibleFrame.minY }
@@ -1156,7 +1230,7 @@ final class App: NSObject, NSApplicationDelegate {
             vx = -vx * 0.5
         }
         toy?.step(dt: dt, t: view.t, floor: floor, minX: vis.minX, maxX: vis.maxX)
-        panel.setFrameOrigin(NSPoint(x: cx - half, y: floor + air - 2 * s))
+        panel.setFrameOrigin(NSPoint(x: cx - half, y: floor + air - footOffset + 2 * s))
     }
 
     /// Walks toward the target; true once there.
@@ -1221,6 +1295,37 @@ final class App: NSObject, NSApplicationDelegate {
         lastPlay = Date().timeIntervalSince1970
         if act == "play" { act = "idle"; actUntil = lastPlay + 3 }
     }
+
+    @available(macOS 14, *)
+    @objc func onDisplayFrame(_ link: CADisplayLink) { frame() }
+
+    /// Frame rate for what is happening now: flight, drags and toys get every display frame,
+    /// walking and eating 60 fps, rest 30 fps.
+    var frameRate: Double {
+        if air > 0 || vy != 0 || vx != 0 || view.held || toy != nil || !confetti.isEmpty { return 1000 }
+        if view.walking || view.searching || !view.drops.isEmpty || !view.pending.isEmpty
+            || view.t < view.celebrateUntil || view.t < view.squashUntil { return 60 }
+        return 30
+    }
+
+    func frame() {
+        let t = Date().timeIntervalSince1970
+        if t - lastStep < 1 / frameRate - 0.002 { return }
+        let dt = min(0.05, t - lastStep)
+        roamStep(dt: CGFloat(dt), now: t)
+        view.step(dt: dt)
+        lastStep = t
+        if fpsLog {   // debug: CLAWDLING_FPSLOG=1 logs frames per second while something moves
+            fpsFrames += 1
+            if t - fpsSince >= 1 {
+                if frameRate > 30 { NSLog("clawdling fps=%d rate=%.0f", fpsFrames, frameRate) }
+                fpsFrames = 0
+                fpsSince = t
+            }
+        }
+    }
+    let fpsLog = ProcessInfo.processInfo.environment["CLAWDLING_FPSLOG"] != nil
+    var fpsFrames = 0, fpsSince = 0.0
 
     func applyScale() {
         let s = CGFloat(world.save.scale)
@@ -1342,7 +1447,7 @@ final class App: NSObject, NSApplicationDelegate {
         world.save.roam = !roam
         world.dirty = true
         world.persist()
-        if !roam { endPlay() } else { act = "fall"; air = max(0, panel.frame.origin.y - floorInfo().1) }
+        if !roam { endPlay() } else { act = "fall"; air = max(0, panel.frame.origin.y + footOffset - 2 * CGFloat(world.save.scale) - floorInfo().1) }
     }
 
     @objc func toyAction() {
@@ -1399,7 +1504,7 @@ if let dir = ProcessInfo.processInfo.environment["CLAWDLING_FRAMES"] {
             if f % 30 == 12 + i % 5 { v.blinkUntil = v.t + 0.12 }
             let jump: CGFloat = c.2 == "party" ? abs(CGFloat(sin(ft * .pi * 2 / 1.5))) * 26 : 0
             g.cgContext.saveGState()
-            g.cgContext.translateBy(x: CGFloat(i) * cw, y: ch + 2 + jump)
+            g.cgContext.translateBy(x: CGFloat(i) * cw, y: ch + 2 + jump - (FOOT_PAD - 4))
             g.cgContext.scaleBy(x: 1, y: -1)
             NSGraphicsContext.current = NSGraphicsContext(cgContext: g.cgContext, flipped: true)
             v.air = jump
@@ -1429,7 +1534,7 @@ if let sheetPath = ProcessInfo.processInfo.environment["CLAWDLING_SHEET"] {
     let cols = SPECIES.count, moods: [(String, String?)] = [
         ("egg", nil), ("happy", nil), ("happy", "hacker"), ("happy", "builder"), ("happy", "explorer"),
         ("happy", "owl"), ("happy", "queen"), ("hungry", nil), ("starving", nil), ("dead", nil),
-        ("search", nil), ("party", nil)]
+        ("search", nil), ("party", nil), ("spin", nil)]
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(W) * cols, pixelsHigh: Int(H) * moods.count,
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
@@ -1456,6 +1561,7 @@ if let sheetPath = ProcessInfo.processInfo.environment["CLAWDLING_SHEET"] {
             if ri == 7 { v.mouthUntil = 1e9 }
             if mood == "search" { v.searching = true; v.lean = ci % 2 == 0 ? 1 : -1 }
             if mood == "party" { v.celebrateUntil = 1e9 }
+            if mood == "spin" { v.spin = CGFloat(ci) * .pi / 6 + .pi / 4 }   // tumble angles must stay inside the window
             gctx.cgContext.saveGState()
             // the bitmap context is not flipped: flip each cell by hand
             gctx.cgContext.translateBy(x: CGFloat(ci) * W, y: H * CGFloat(moods.count - ri))
