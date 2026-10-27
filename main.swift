@@ -543,6 +543,31 @@ final class PetView: NSView {
         needsDisplay = true
     }
 
+    /// The pet's current body (egg, gravestone, or the creature itself) as an 18-pt menu bar icon.
+    func menuBarIcon() -> NSImage {
+        let w = world, m = mood, sp = w.species
+        let rows: [String], pal: [Character: NSColor], palKey: String
+        if m == "dead" {
+            rows = TOMB_ROWS; palKey = "tomb"
+            pal = palette(body: 0xaeb0bb, accent: 0x6fbf5a, light: nil, outline: 0x5d5f6b, mouth: nil)
+        } else if m == "egg" {
+            rows = EGG_ROWS; palKey = "egg\(w.pet.species)\(w.pet.colorIndex)"
+            pal = palette(body: 0xfbf4e4, accent: sp.colors[w.pet.colorIndex % sp.colors.count], light: nil, outline: 0x8a7f6a, mouth: nil)
+        } else {
+            rows = sp.rows; palKey = "\(sp.id)\(w.pet.colorIndex)"
+            pal = palette(body: sp.colors[w.pet.colorIndex % sp.colors.count], accent: sp.accent, light: sp.light, outline: sp.outline, mouth: sp.mouth)
+        }
+        let body = spriteImage(rows: rows, sprite: sprite(rows), pal: pal, palKey: palKey,
+                               closed: m == "sleep", party: false, open: false, grey: m == "starving")
+        let icon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { r in
+            NSGraphicsContext.current?.imageInterpolation = .none
+            body.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        icon.isTemplate = false
+        return icon
+    }
+
     func pet() {
         switch mood {
         case "dead", "starving", "hungry": break
@@ -990,6 +1015,8 @@ final class App: NSObject, NSApplicationDelegate {
     var panel: NSPanel!
     var view: PetView!
     var lastStep = Date().timeIntervalSince1970
+    var statusItem: NSStatusItem!
+    var iconKey = ""
 
     // walking along the screen floor
     var act = "fall"            // idle, walk, play, fall
@@ -1074,16 +1101,75 @@ final class App: NSObject, NSApplicationDelegate {
             // display-synced frames (100/120 Hz on ProMotion and fast monitors)
             let link = view.displayLink(target: self, selector: #selector(onDisplayFrame(_:)))
             link.add(to: .main, forMode: .common)
-        } else {
-            Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.frame() }
         }
+        // backup clock: a display link stops when its window is on no display, and the pet would freeze there
+        let backup = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if Date().timeIntervalSince1970 - self.lastStep > 0.1 { self.frame() }
+        }
+        RunLoop.main.add(backup, forMode: .common)
+
+        // menu bar icon: the pet itself; click for its menu and "Find"
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusClicked)
+        statusItem.button?.toolTip = "Clawdling"
+        updateStatusIcon()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self else { return }
             let t = Date().timeIntervalSince1970
             self.world.pollEvents(now: t)
             self.world.tick(now: t)
             self.world.persist()
+            self.updateStatusIcon()
+            self.rescueIfLost()
         }
+    }
+
+    func updateStatusIcon() {
+        let key = "\(view.mood)\(world.pet.species)\(world.pet.colorIndex)"
+        guard key != iconKey else { return }
+        iconKey = key
+        statusItem.button?.image = view.menuBarIcon()
+    }
+
+    @objc func statusClicked() {
+        statusItem.menu = makeMenu(fromStatusBar: true)
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    /// The pet's middle is on no screen (thrown into a gap between monitors, a display unplugged): bring it back.
+    func rescueIfLost() {
+        guard !view.held else { return }
+        let c = NSPoint(x: panel.frame.midX, y: panel.frame.minY + footOffset + 40 * CGFloat(world.save.scale))
+        if NSScreen.screens.contains(where: { $0.frame.contains(c) }) { return }
+        let scr = NSScreen.screens.min { hypot($0.frame.midX - c.x, $0.frame.midY - c.y) < hypot($1.frame.midX - c.x, $1.frame.midY - c.y) }
+            ?? NSScreen.main!
+        dropPet(at: NSPoint(x: min(max(c.x, scr.visibleFrame.minX + 80), scr.visibleFrame.maxX - 80),
+                            y: scr.visibleFrame.minY + scr.visibleFrame.height * 0.4))
+    }
+
+    /// Puts the pet with its feet at `p` (global coordinates) and lets it fall to the floor there.
+    func dropPet(at p: NSPoint) {
+        let s = CGFloat(world.save.scale)
+        panel.setFrameOrigin(NSPoint(x: p.x - W / 2 * s, y: p.y - footOffset + 2 * s))
+        let floor = floorInfo().1
+        lastFloor = floor
+        air = max(0, p.y - floor)
+        vx = 0; vy = 0; spinRate = 0; view.spin = 0
+        act = "fall"
+        panel.orderFrontRegardless()
+        lastStep = Date().timeIntervalSince1970
+    }
+
+    /// Menu bar "Find": the pet appears under the cursor, on whatever screen you are, and drops to the floor.
+    @objc func findAction() {
+        let m = NSEvent.mouseLocation
+        let scr = NSScreen.screens.first { $0.frame.contains(m) } ?? NSScreen.main!
+        let vis = scr.visibleFrame
+        if !roam { world.save.roam = true; world.dirty = true }
+        dropPet(at: NSPoint(x: min(max(m.x, vis.minX + 80), vis.maxX - 80), y: min(m.y - 40, vis.maxY - 200)))
     }
 
 
@@ -1334,17 +1420,22 @@ final class App: NSObject, NSApplicationDelegate {
         view.frame = NSRect(x: 0, y: 0, width: W * s, height: H * s)
     }
 
-    func makeMenu() -> NSMenu {
+    func makeMenu(fromStatusBar: Bool = false) -> NSMenu {
         let m = NSMenu()
         let p = world.pet
         let title: String
         if p.dead { title = "🪦 \(p.name)" }
         else if world.isEgg { title = "🥚 egg" }
-        else { title = "\(p.name) — \(world.species.name)" + (p.form.map { " · \(FORM_NAME[$0]!)" } ?? "") }
+        else { title = "\(p.name) — \(world.species.name)" + (p.form.map { " · \(FORM_NAME[$0]!)" } ?? "")
+                      + " · \(Int(world.full(at: Date().timeIntervalSince1970)))% full" }
         let head = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         head.isEnabled = false
         m.addItem(head)
         m.addItem(.separator())
+        if fromStatusBar {
+            m.addItem(item(p.dead ? "Show the grave" : "Find \(world.isEgg ? "the egg" : p.name)", #selector(findAction)))
+            m.addItem(.separator())
+        }
         m.addItem(item("Stats…", #selector(statsAction)))
         m.addItem(item("Graveyard (\(world.save.graves.count))…", #selector(gravesAction)))
         if p.dead { m.addItem(item("Bury and take a new egg 🥚", #selector(reviveAction))) }
