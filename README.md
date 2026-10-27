@@ -45,6 +45,8 @@ Then work as usual: a couple of prompts and one finished task hatch the egg. If 
 - At 0 it turns grey and lies down. **After 48 hours without food it dies.** Right-click the gravestone to bury it and take a new egg. The graveyard remembers everyone.
 - After 20 idle minutes it falls asleep 💤. The next bite wakes it up.
 
+<p align="center"><img src="assets/items.png" alt="Pixel food, heart, sleep Z, ball, yarn, butterfly and party popper" width="100%"></p>
+
 ### Species and evolutions
 
 Each egg hatches into a random **slime, ghost, kitty, fox kit, froglet, crab or chick** with a random name and color. On day 7 it evolves based on its diet:

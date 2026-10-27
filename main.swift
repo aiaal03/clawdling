@@ -16,9 +16,9 @@ let HATCH_POINTS = 15.0       // food an egg needs to hatch
 let EVOLVE_DAYS = 7.0
 let SLEEP_IDLE = 20.0 * 60    // 20 idle minutes and it falls asleep
 
-let FOOD: [String: (emoji: String, pts: Double)] = [
-    "prompt": ("🍙", 3), "edit": ("🍎", 1), "bash": ("☕️", 1), "web": ("🐟", 2),
-    "agent": ("🎂", 10), "done": ("🍪", 5), "other": ("🍬", 0.5),
+let FOOD: [String: (art: String, pts: Double)] = [
+    "prompt": ("rice", 3), "edit": ("apple", 1), "bash": ("coffee", 1), "web": ("fish", 2),
+    "agent": ("cake", 10), "done": ("cookie", 5), "other": ("candy", 0.5),
 ]
 
 let NAMES = ["Bagel", "Pixel", "Muffin", "Sprout", "Mochi", "Tofu", "Byte", "Button",
@@ -104,23 +104,68 @@ struct Sprite {
     }
 }
 
-var emojiCache: [String: NSImage] = [:]
-/// An emoji rendered once into an image; drawing text every frame was the costliest part of a frame.
-func emojiImage(_ e: String, size: CGFloat) -> NSImage {
-    let key = "\(e)@\(size)"
-    if let img = emojiCache[key] { return img }
-    let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size)]
-    let sz = (e as NSString).size(withAttributes: a)
-    let img = NSImage(size: sz, flipped: true) { _ in (e as NSString).draw(at: .zero, withAttributes: a); return true }
-    emojiCache[key] = img
+/// Pixel art for food, icons, toys and poppers: rows of palette letters, '.' is empty.
+let ART: [String: (rows: [String], colors: [Character: Int])] = [
+    "rice": (["....oooo....", "...owwwwo...", "..owwwwwwo..", "..owwwhwwo..", ".owwwwwwwwo.", ".owwwwwwwwo.", "owwwwwwwwwwo", "owwwnnnnwwwo", "owwwnnnnwwwo", ".oownnnnwoo.", "...oooooo..."],
+        ["o": 0x4a4a5a, "w": 0xfffaf0, "h": 0xffffff, "n": 0x1f3a2a]),
+    "apple": ([".....b......", ".....bgg....", "..ooobgooo..", ".orrrrrrhro.", "orrrrrrrrhro", "orrrrrrrrrro", "orrrrrrrrrro", "orrrrrrrrrro", ".orrrrrrrdo.", ".orrrrrrddo.", "..oorrrdoo..", "....oooo...."],
+        ["o": 0x6e1a24, "r": 0xe5534b, "h": 0xffb3a8, "d": 0xb83a34, "b": 0x6b4226, "g": 0x5cc46a]),
+    "coffee": (["...s..s.....", "....s..s....", "...s..s.....", ".oooooooo...", ".occccccooo.", ".owwwwwwo.o.", ".owwwwwwo.o.", ".owwwwwwooo.", ".owwwwwwo...", "..owwwwo....", "...oooo....."],
+        ["o": 0x3a2a2a, "c": 0x7a4a2a, "w": 0xf4efe6, "s": 0xc8d0dc]),
+    "fish": (["...ooooo....", ".oobbbbbo..o", "obewbbbbbobo", "obbbbbbbbbbo", "ollllllllobo", ".oolllllo..o", "...ooooo...."],
+        ["o": 0x24405e, "b": 0x6ab8f0, "l": 0xd8f0ff, "e": 0x1d1b2b, "w": 0xffffff]),
+    "cake": ([".....f......", ".....k......", ".....k......", "..oooooooo..", ".owwwwwwwwo.", ".owpwwpwwpo.", ".obbbbbbbbo.", ".oppppppppo.", ".obbbbbbbbo.", ".obbbbbbbbo.", "..oooooooo.."],
+        ["o": 0x6b3a22, "w": 0xfffaf5, "p": 0xf28fc0, "b": 0xf3c98b, "f": 0xffb03a, "k": 0x7c83ff]),
+    "cookie": (["...oooooo...", "..obbbbbbo..", ".obbdbbbhbo.", "obbbbbbdbbbo", "obdbbbbbbbbo", "obbbbdbbbdbo", "obbbbbbbbbbo", ".obdbbbbdbo.", "..obbbbbbo..", "...oooooo..."],
+        ["o": 0x6b3a1a, "b": 0xd9a35a, "h": 0xf0c888, "d": 0x4a2a1a]),
+    "candy": (["oo..oooo..oo", "opooppwpoopo", "oppppppppppo", "opooppppoopo", "oo..oooo..oo"],
+        ["o": 0x8a2050, "p": 0xff6fa0, "w": 0xffffff]),
+    "heart": ([".oo...oo.", "orro.orro", "orwrorrro", "orrrrrrro", ".orrrrro.", "..orrro..", "...oro...", "....o...."],
+        ["o": 0x8a1f35, "r": 0xff5d73, "w": 0xffd0d8]),
+    "zzz": (["ooooo", "...o.", "..o..", ".o...", "ooooo"],
+        ["o": 0x6b6390]),
+    "ball": (["...oooo...", ".oowrrboo.", ".owwrrbbo.", "owhwrrbbbo", "owwwrrbbbo", "owwwrrbbbo", "owwwrrbbbo", ".owwrrbbo.", ".oowrrboo.", "...oooo..."],
+        ["o": 0x2b2b3a, "w": 0xffffff, "h": 0xd8e4ff, "r": 0xe5534b, "b": 0x4f7cff]),
+    "yarn": (["...oooo...", ".oopppoo..", ".oplpplpo.", "oppplpplpo", "oplpplpppo", "opplpplppo", "oppplpplpo", ".opplpppo.", ".oopppooo.", "...oooo.oo"],
+        ["o": 0x4a2f7a, "p": 0xb48cf2, "l": 0xe2d4ff]),
+    "butterfly": (["...o...o...", "oo..o.o..oo", "oyyo.k.oyyo", "oyyyokoyyyo", ".oyyokoyyo.", ".oddokoddo.", "..oo.k.oo.."],
+        ["o": 0x5a2a0a, "y": 0xff9a2e, "d": 0xffd23f, "k": 0x2b2b3a]),
+    "popper": (["oooooooooo", "oyrrryybro", ".oyrrybbo.", ".oyyrrbbo.", "..oyrrbo..", "..oyyrbo..", "...oyro...", "...oyro...", "....oo...."],
+        ["o": 0x5a2a3a, "y": 0xffd23f, "r": 0xff5d73, "b": 0x4fd1c5]),
+]
+
+var artImages: [String: NSImage] = [:]
+/// One piece of pixel art as an image (one pixel per art cell), built once and scaled up without smoothing.
+func artImage(_ name: String) -> NSImage {
+    if let img = artImages[name] { return img }
+    let a = ART[name] ?? ART["candy"]!
+    let w = a.rows[0].count, h = a.rows.count
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8,
+                               samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    let bytes = rep.bitmapData!, stride = rep.bytesPerRow
+    memset(bytes, 0, stride * h)
+    for (r, row) in a.rows.enumerated() {
+        for (c, ch) in row.enumerated() {
+            guard let v = a.colors[ch] else { continue }
+            let o = r * stride + c * 4
+            bytes[o] = UInt8((v >> 16) & 255); bytes[o + 1] = UInt8((v >> 8) & 255)
+            bytes[o + 2] = UInt8(v & 255); bytes[o + 3] = 255
+        }
+    }
+    let img = NSImage(size: NSSize(width: w, height: h))
+    img.addRepresentation(rep.retagging(with: .sRGB) ?? rep)
+    artImages[name] = img
     return img
 }
 
-/// Draws a cached emoji with its top-left at `p` (flipped views) or bottom-left (unflipped).
-func drawEmoji(_ e: String, size: CGFloat, at p: NSPoint, alpha: CGFloat = 1) {
-    let img = emojiImage(e, size: size)
-    img.draw(in: NSRect(origin: p, size: img.size), from: .zero, operation: .sourceOver, fraction: alpha,
-             respectFlipped: true, hints: nil)
+/// Draws pixel art centred on `c`, each art cell `px` points wide; `flapX` squashes it sideways (wings).
+func drawArt(_ name: String, px: CGFloat, center c: NSPoint, alpha: CGFloat = 1, flapX: CGFloat = 1) {
+    let img = artImage(name)
+    let w = img.size.width * px * flapX, h = img.size.height * px
+    NSGraphicsContext.current?.imageInterpolation = .none
+    img.draw(in: NSRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h), from: .zero,
+             operation: .sourceOver, fraction: alpha, respectFlipped: true, hints: nil)
 }
 
 var spriteImages: [String: NSImage] = [:]
@@ -351,7 +396,7 @@ final class World {
         p.notifiedHungry = false
         p.notifiedDying = false
         pet = p
-        if live { onFood?(food.emoji, food.pts) }
+        if live { onFood?(food.art, food.pts) }
     }
 
     func die(at t: Double) {
@@ -435,7 +480,7 @@ final class World {
 
 // MARK: - View
 
-struct Drop { var emoji: String; var x: CGFloat; var y: CGFloat; var vy: CGFloat; var pts: Double }
+struct Drop { var art: String; var x: CGFloat; var y: CGFloat; var vy: CGFloat; var pts: Double }
 struct Particle { var text: String; var x: CGFloat; var y: CGFloat; var vy: CGFloat; var vx: CGFloat; var life: Double; var size: CGFloat; var color: NSColor }
 
 let W: CGFloat = 200, CELL: CGFloat = 6
@@ -476,8 +521,8 @@ final class PetView: NSView {
     var t: Double { now - t0 }
 
 
-    func enqueue(_ emoji: String, _ pts: Double) {
-        if pending.count < 12 { pending.append((emoji, pts)) }
+    func enqueue(_ art: String, _ pts: Double) {
+        if pending.count < 12 { pending.append((art, pts)) }
     }
 
     var mouthY: CGFloat {
@@ -515,7 +560,7 @@ final class PetView: NSView {
         if m == "egg" && t > nextWobble { wobbleUntil = t + 0.6; nextWobble = t + Double.random(in: 2...5) }
         if !pending.isEmpty && t - lastRelease > 0.22 {
             let (e, p) = pending.removeFirst()
-            drops.append(Drop(emoji: e, x: W / 2 + CGFloat.random(in: -26...26), y: -24, vy: 40, pts: p))
+            drops.append(Drop(art: e, x: W / 2 + CGFloat.random(in: -26...26), y: -24, vy: 40, pts: p))
             lastRelease = t
         }
         let target = mouthY - 14
@@ -536,8 +581,8 @@ final class PetView: NSView {
             particles[i].life -= dt
         }
         particles.removeAll { $0.life <= 0 }
-        if m == "sleep" && Int(t * 10) % 14 == 0 && particles.filter({ $0.text == "💤" }).count < 2 {
-            particles.append(Particle(text: "💤", x: W / 2 + 30, y: SPRITE_Y + 20, vy: -14, vx: 8, life: 2.4, size: 13, color: hex(0x6b6390)))
+        if m == "sleep" && Int(t * 10) % 14 == 0 && particles.filter({ $0.text == "zzz" }).count < 2 {
+            particles.append(Particle(text: "zzz", x: W / 2 + 30, y: SPRITE_Y + 20, vy: -14, vx: 8, life: 2.4, size: 13, color: hex(0x6b6390)))
         }
         needsDisplay = true
     }
@@ -573,7 +618,7 @@ final class PetView: NSView {
         case "egg": wobbleUntil = t + 0.6
         default:
             for i in 0..<4 {
-                particles.append(Particle(text: "❤️", x: W / 2 + CGFloat(i * 14 - 24), y: SPRITE_Y + 30, vy: -30 - CGFloat(i * 6), vx: CGFloat.random(in: -8...8), life: 1.3, size: 13, color: .red))
+                particles.append(Particle(text: "heart", x: W / 2 + CGFloat(i * 14 - 24), y: SPRITE_Y + 30, vy: -30 - CGFloat(i * 6), vx: CGFloat.random(in: -8...8), life: 1.3, size: 13, color: .red))
             }
         }
     }
@@ -646,11 +691,11 @@ final class PetView: NSView {
 
         // food
         for d in drops {
-            drawEmoji(d.emoji, size: 20, at: NSPoint(x: d.x, y: d.y))
+            drawArt(d.art, px: 2, center: NSPoint(x: d.x + 12, y: d.y + 12))
         }
         // particles
         for p in particles {
-            drawEmoji(p.text, size: p.size, at: NSPoint(x: p.x, y: p.y), alpha: CGFloat(min(1, p.life * 1.5)))
+            drawArt(p.text, px: p.size / 7, center: NSPoint(x: p.x + 7, y: p.y + 7), alpha: CGFloat(min(1, p.life * 1.5)))
         }
         if searching && m != "dead" && m != "egg" { drawMagnifier() }
         ctx.restoreGState()
@@ -810,7 +855,7 @@ final class PetView: NSView {
 // MARK: - Toys (a small window of their own on the screen floor)
 
 final class ToyView: NSView {
-    var emoji = "⚽️"
+    var art = "ball"
     var angle: CGFloat = 0
     var onKick: (() -> Void)?
     override var isFlipped: Bool { true }
@@ -819,9 +864,9 @@ final class ToyView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.translateBy(x: bounds.midX, y: bounds.midY)
         ctx.rotate(by: angle)
-        let img = emojiImage(emoji, size: bounds.width * 0.62)
-        img.draw(in: NSRect(x: -img.size.width / 2, y: -img.size.height / 2, width: img.size.width, height: img.size.height),
-                 from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        // a butterfly flaps: its wings squash sideways and spring back
+        let flap = art == "butterfly" ? 0.35 + 0.65 * abs(CGFloat(sin(Date().timeIntervalSince1970 * 14))) : 1
+        drawArt(art, px: bounds.width / 15, center: .zero, flapX: flap)
     }
     override func mouseDown(with e: NSEvent) { onKick?() }
 }
@@ -840,7 +885,7 @@ final class Toy {
         self.x = x
         self.y = y
         size = 40 * scale
-        view.emoji = ["ball": "⚽️", "yarn": "🧶", "butterfly": "🦋"][kind] ?? "⚽️"
+        view.art = kind
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: size, height: size),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
@@ -942,15 +987,16 @@ final class ConfettiView: NSView {
         }
         // poppers at both sides for the first 1.5 s
         if age < 1.5 {
-            let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 34)]
-            let k = CGFloat(min(1, age * 6)), y: CGFloat = 40
-            ctx.saveGState()
-            ctx.setAlpha(CGFloat(min(1, (1.5 - age) * 3)))
-            ("🎉" as NSString).draw(at: NSPoint(x: bounds.midX + 70 * k, y: y), withAttributes: a)
-            ctx.translateBy(x: bounds.midX - 70 * k, y: 0)
-            ctx.scaleBy(x: -1, y: 1)
-            ("🎉" as NSString).draw(at: NSPoint(x: 0, y: y), withAttributes: a)
-            ctx.restoreGState()
+            // pixel party cones, mouths tipped outwards, sliding apart as they pop
+            let k = CGFloat(min(1, age * 6)), y: CGFloat = 58
+            let alpha = CGFloat(min(1, (1.5 - age) * 3))
+            for side: CGFloat in [-1, 1] {
+                ctx.saveGState()
+                ctx.translateBy(x: bounds.midX + side * 72 * k, y: y)
+                ctx.rotate(by: side * -0.6)   // mouths tip outwards
+                drawArt("popper", px: 3, center: .zero, alpha: alpha)
+                ctx.restoreGState()
+            }
         }
     }
 }
@@ -1744,6 +1790,25 @@ if let earPath = ProcessInfo.processInfo.environment["CLAWDLING_EARSHOT"] {
     }
     NSGraphicsContext.restoreGraphicsState()
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: earPath))
+    exit(0)
+}
+
+// Debug: CLAWDLING_ARTSHEET=/path.png renders every piece of pixel art (food, icons, toys, popper) and exits.
+if let artPath = ProcessInfo.processInfo.environment["CLAWDLING_ARTSHEET"] {
+    let names = ["rice", "apple", "coffee", "fish", "cake", "cookie", "candy", "heart", "zzz", "ball", "yarn", "butterfly", "popper"]
+    let cw: CGFloat = 64, k: CGFloat = 2
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(cw * CGFloat(names.count) * k), pixelsHigh: Int(cw * k),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    let g = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = g
+    g.cgContext.scaleBy(x: k, y: k)
+    hex(0x2b3040).setFill()
+    NSRect(x: 0, y: 0, width: cw * CGFloat(names.count), height: cw).fill()
+    for (i, n) in names.enumerated() { drawArt(n, px: 3.5, center: NSPoint(x: CGFloat(i) * cw + cw / 2, y: cw / 2)) }
+    NSGraphicsContext.restoreGraphicsState()
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: artPath))
     exit(0)
 }
 
