@@ -626,6 +626,8 @@ final class PetView: NSView {
     // MARK: drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        NSColor.clear.set()
+        dirtyRect.fill(using: .copy)
         let scale = CGFloat(world.save.scale)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
@@ -861,6 +863,8 @@ final class ToyView: NSView {
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func draw(_ r: NSRect) {
+        NSColor.clear.set()
+        r.fill(using: .copy)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.translateBy(x: bounds.midX, y: bounds.midY)
         ctx.rotate(by: angle)
@@ -872,6 +876,8 @@ final class ToyView: NSView {
 }
 
 final class Toy {
+    /// Every toy window that is on screen, so strays can be found and closed.
+    static var live: [Toy] = []
     let kind: String          // ball, yarn, butterfly
     let panel: NSPanel
     let view = ToyView()
@@ -897,6 +903,7 @@ final class Toy {
         view.frame = NSRect(x: 0, y: 0, width: size, height: size)
         panel.contentView = view
         panel.orderFront(nil)
+        Toy.live.append(self)
     }
 
     var g: CGFloat = 1300
@@ -937,7 +944,10 @@ final class Toy {
         view.needsDisplay = true
     }
 
-    func close() { panel.orderOut(nil) }
+    func close() {
+        panel.orderOut(nil)
+        Toy.live.removeAll { $0 === self }
+    }
 }
 
 
@@ -974,6 +984,8 @@ final class ConfettiView: NSView {
     }
 
     override func draw(_ r: NSRect) {
+        NSColor.clear.set()
+        r.fill(using: .copy)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let fade = CGFloat(max(0, min(1, (4.0 - age) / 1.0)))
         for p in pieces where p.y > -10 {
@@ -1040,6 +1052,8 @@ final class EarView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ r: NSRect) {
+        NSColor.clear.set()
+        r.fill(using: .copy)
         // black tab, flush with the notch on its right, rounded at the bottom left like the notch itself
         let b = bounds, rad: CGFloat = 9
         let path = NSBezierPath()
@@ -1252,6 +1266,8 @@ final class App: NSObject, NSApplicationDelegate {
             self.world.persist()
             self.updateStatusIcon()
             self.rescueIfLost()
+            // safety net: no toy window may outlive its game
+            for stray in Toy.live where stray !== self.toy { stray.close() }
         }
     }
 
@@ -1488,6 +1504,7 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     func startPlay(now: Double, cx: CGFloat, minC: CGFloat, maxC: CGFloat, s: CGFloat) {
+        toy?.close()   // picking the pet up mid-game left the old toy on screen for good
         let kind = ["ball", "yarn", "butterfly"].randomElement()!
         let x = min(max(cx + CGFloat.random(in: 140...260) * s * (Bool.random() ? 1 : -1), minC), maxC)
         let toy = Toy(kind: kind, x: x, y: kind == "butterfly" ? 80 : 260, scale: s)
