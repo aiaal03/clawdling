@@ -1008,6 +1008,100 @@ final class Confetti {
     func close() { panel.orderOut(nil) }
 }
 
+
+// MARK: - Notch ear: the pet's icon in a black tab grown out of the MacBook notch
+
+final class EarView: NSView {
+    var icon: NSImage?
+    var fullness: Double = 1      // 0…1, drawn as a thin bar; < 0 hides it
+    var notchOverlap: CGFloat = 12
+    var bumpUntil = 0.0
+    var onClick: ((NSEvent) -> Void)?
+    override var isFlipped: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ r: NSRect) {
+        // black tab, flush with the notch on the left, rounded at the bottom right like the notch itself
+        let b = bounds, rad: CGFloat = 9
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 0, y: b.maxY))
+        path.line(to: NSPoint(x: b.maxX, y: b.maxY))
+        path.line(to: NSPoint(x: b.maxX, y: rad))
+        path.appendArc(withCenter: NSPoint(x: b.maxX - rad, y: rad), radius: rad, startAngle: 0, endAngle: -90, clockwise: true)
+        path.line(to: NSPoint(x: 0, y: 0))
+        path.close()
+        NSColor.black.setFill()
+        path.fill()
+        let area = NSRect(x: notchOverlap, y: 0, width: b.width - notchOverlap, height: b.height)
+        let hop = Date().timeIntervalSince1970 < bumpUntil ? CGFloat(2) : 0
+        let c = NSPoint(x: area.midX, y: area.midY + hop)
+        // health ring around the pet: fills clockwise from the top, green → yellow → red
+        let ringR: CGFloat = 12
+        if fullness >= 0 {
+            let track = NSBezierPath()
+            track.appendArc(withCenter: c, radius: ringR, startAngle: 0, endAngle: 360)
+            track.lineWidth = 2.5
+            NSColor(white: 1, alpha: 0.16).setStroke()
+            track.stroke()
+            let f = CGFloat(min(1, max(0, fullness)))
+            if f > 0 {
+                let arc = NSBezierPath()
+                arc.appendArc(withCenter: c, radius: ringR, startAngle: 90, endAngle: 90 - 360 * f, clockwise: true)
+                arc.lineWidth = 2.5
+                arc.lineCapStyle = .round
+                (fullness > 0.6 ? hex(0x5cc46a) : fullness > 0.3 ? hex(0xf2b33d) : hex(0xe5534b)).setStroke()
+                arc.stroke()
+            }
+        }
+        if let icon {
+            NSGraphicsContext.current?.imageInterpolation = .none
+            let size: CGFloat = 16
+            icon.draw(in: NSRect(x: c.x - size / 2, y: c.y - size / 2, width: size, height: size),
+                      from: .zero, operation: .sourceOver, fraction: 1)
+        }
+    }
+
+    override func mouseDown(with e: NSEvent) { onClick?(e) }
+}
+
+final class NotchEar {
+    let panel: NSPanel
+    let view = EarView()
+    static let width: CGFloat = 34   // visible part, right of the notch
+
+    init() {
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 46, height: 32),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)   // above the menu bar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.hidesOnDeactivate = false
+        panel.contentView = view
+    }
+
+    /// The notch of the first screen that has one, in global coordinates.
+    static func notchRect() -> NSRect? {
+        for scr in NSScreen.screens where scr.safeAreaInsets.top > 0 {
+            guard let l = scr.auxiliaryTopLeftArea, let r = scr.auxiliaryTopRightArea else { continue }
+            return NSRect(x: l.maxX, y: scr.frame.maxY - scr.safeAreaInsets.top,
+                          width: r.minX - l.maxX, height: scr.safeAreaInsets.top)
+        }
+        return nil
+    }
+
+    /// Sits the tab against the notch's right edge; false when no screen has a notch.
+    @discardableResult func place() -> Bool {
+        guard let n = NotchEar.notchRect() else { panel.orderOut(nil); return false }
+        let f = NSRect(x: n.maxX - view.notchOverlap, y: n.minY, width: NotchEar.width + view.notchOverlap, height: n.height)
+        panel.setFrame(f, display: true)
+        view.frame = NSRect(origin: .zero, size: f.size)
+        panel.orderFrontRegardless()
+        return true
+    }
+}
+
 // MARK: - App
 
 final class App: NSObject, NSApplicationDelegate {
@@ -1016,6 +1110,7 @@ final class App: NSObject, NSApplicationDelegate {
     var view: PetView!
     var lastStep = Date().timeIntervalSince1970
     var statusItem: NSStatusItem!
+    let ear = NotchEar()
     var iconKey = ""
 
     // walking along the screen floor
@@ -1057,7 +1152,13 @@ final class App: NSObject, NSApplicationDelegate {
         panel.orderFrontRegardless()
         air = 400   // drops to the floor on launch
 
-        world.onFood = { [weak self] e, p in self?.view.enqueue(e, p) }
+        world.onFood = { [weak self] e, p in
+            guard let self else { return }
+            self.view.enqueue(e, p)
+            self.ear.view.bumpUntil = Date().timeIntervalSince1970 + 0.18
+            self.ear.view.needsDisplay = true
+            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in self?.ear.view.needsDisplay = true }
+        }
         world.onAsk = { [weak self] in self?.startSearch() }
         // Debug: CLAWDLING_THROW="vx,vy[,x,y]" throws the pet 2 s after launch (points/s), from mid-screen or a global point.
         if let th = ProcessInfo.processInfo.environment["CLAWDLING_THROW"] {
@@ -1114,6 +1215,15 @@ final class App: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusClicked)
         statusItem.button?.toolTip = "Clawdling"
+        // by the notch when the Mac has one; otherwise a regular menu bar icon
+        ear.view.onClick = { [weak self] e in
+            guard let self else { return }
+            let menu = self.makeMenu(fromStatusBar: true)
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: self.ear.view)
+        }
+        placeIcon()
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in self?.placeIcon() }
         updateStatusIcon()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -1126,11 +1236,25 @@ final class App: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The icon lives in the notch tab when a notch exists, in the menu bar otherwise.
+    func placeIcon() {
+        let inNotch = ear.place()
+        statusItem.isVisible = !inNotch
+        iconKey = ""
+        updateStatusIcon()
+    }
+
     func updateStatusIcon() {
+        let now = Date().timeIntervalSince1970
+        let full = world.pet.dead || world.isEgg ? -1 : world.full(at: now) / 100
+        if ear.view.fullness != full { ear.view.fullness = full; ear.view.needsDisplay = true }
         let key = "\(view.mood)\(world.pet.species)\(world.pet.colorIndex)"
         guard key != iconKey else { return }
         iconKey = key
-        statusItem.button?.image = view.menuBarIcon()
+        let icon = view.menuBarIcon()
+        statusItem.button?.image = icon
+        ear.view.icon = icon
+        ear.view.needsDisplay = true
     }
 
     @objc func statusClicked() {
@@ -1617,6 +1741,36 @@ if let dir = ProcessInfo.processInfo.environment["CLAWDLING_FRAMES"] {
         let path = String(format: "%@/frame_%03d.png", dir, f)
         try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     }
+    exit(0)
+}
+
+// Debug: CLAWDLING_EARSHOT=/path.png renders the notch tab at three health levels (4× scale) and exits.
+if let earPath = ProcessInfo.processInfo.environment["CLAWDLING_EARSHOT"] {
+    let world = World()
+    let pv = PetView(world: world)
+    let k: CGFloat = 4, ew = NotchEar.width + 12 + 40, eh: CGFloat = 32
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(ew * k * 3), pixelsHigh: Int(eh * k),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    let g = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = g
+    hex(0x3a3f4b).setFill()   // a menu bar-ish grey behind it
+    NSRect(x: 0, y: 0, width: ew * k * 3, height: eh * k).fill()
+    for (i, f) in [0.9, 0.45, 0.15].enumerated() {
+        let v = EarView(frame: NSRect(x: 0, y: 0, width: NotchEar.width + 12, height: eh))
+        v.icon = pv.menuBarIcon()
+        v.fullness = f
+        g.cgContext.saveGState()
+        g.cgContext.scaleBy(x: k, y: k)
+        g.cgContext.translateBy(x: CGFloat(i) * ew + 30, y: 0)
+        NSColor.black.setFill()
+        NSRect(x: -30, y: 0, width: 42, height: eh).fill()   // stand-in for the notch
+        v.draw(v.bounds)
+        g.cgContext.restoreGState()
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: earPath))
     exit(0)
 }
 

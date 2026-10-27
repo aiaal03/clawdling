@@ -61,7 +61,7 @@ Each egg hatches into a random **slime, ghost, kitty, fox kit, froglet, crab or 
 
 ## Using it
 
-- **Menu bar icon.** The pet also lives in the menu bar. Click it for the menu and **Find**: the pet appears under your cursor, on whatever screen you are, and drops to the floor.
+- **In the notch.** On a MacBook with a notch, the pet also sits in a small black tab grown out of the notch, ringed by its health. Without a notch it is a regular menu bar icon. Click it for the menu and **Find**: the pet appears under your cursor, on whatever screen you are, and drops to the floor.
 - **Click** to pet it ❤️. **Double-click** for stats.
 - **Drag** it anywhere, or **throw** it: let go while moving and it flies off at your cursor's speed.
 - **Right-click** for the menu: stats, graveyard, size, walking on/off, give a toy, Telegram alerts, quit.
