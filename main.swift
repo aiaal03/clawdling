@@ -454,7 +454,7 @@ final class PetView: NSView {
     var wobbleUntil = 0.0, nextWobble = 3.0
     var dragStart: NSPoint?, winStart: NSPoint?, dragged = false
     var walking = false, lean: CGFloat = 0, air: CGFloat = 0, held = false
-    var hovering = false, barUntil = 0.0
+    var hovering = false
     var searching = false, celebrateUntil = 0.0
     var onPick: (() -> Void)?
     var onDrop: ((CGVector) -> Void)?
@@ -526,7 +526,6 @@ final class PetView: NSView {
         }
         for d in drops where d.y >= target {
             mouthUntil = t + 0.35
-            barUntil = t + 4
             squashUntil = t + 0.18
             squashAmt = 0.1
         }
@@ -653,8 +652,6 @@ final class PetView: NSView {
         for p in particles {
             drawEmoji(p.text, size: p.size, at: NSPoint(x: p.x, y: p.y), alpha: CGFloat(min(1, p.life * 1.5)))
         }
-        // health bar
-        drawBar(m)
         if searching && m != "dead" && m != "egg" { drawMagnifier() }
         ctx.restoreGState()
     }
@@ -752,30 +749,6 @@ final class PetView: NSView {
         }
     }
 
-    func drawBar(_ m: String) {
-        // just the health bar: after a meal, on hover, or while hungry; no text
-        let w = world
-        guard m != "dead" else { return }
-        let top = CGFloat(sprite(m == "egg" ? EGG_ROWS : w.species.rows).top)
-        let y = SPRITE_Y + top * CELL - 14 + bob
-        let hungry = !w.isEgg && w.full(at: now) < 30
-        guard hovering || t < barUntil || hungry else { return }
-        if m == "egg" {
-            bar(y: y, frac: min(1, w.pet.eggPoints / HATCH_POINTS), color: hex(0xc9b38a))
-        } else {
-            let f = w.full(at: now)
-            bar(y: y, frac: f / 100, color: f > 60 ? hex(0x5cc46a) : f > 30 ? hex(0xf2b33d) : hex(0xe5534b))
-        }
-    }
-
-    func bar(y: CGFloat, frac: Double, color: NSColor) {
-        let bw: CGFloat = 72, x = (W - bw) / 2
-        hex(0x1d1b2b, 0.75).setFill()
-        NSBezierPath(roundedRect: NSRect(x: x, y: y, width: bw, height: 7), xRadius: 3.5, yRadius: 3.5).fill()
-        color.setFill()
-        let fw = max(0, (bw - 2) * CGFloat(frac))
-        if fw > 0 { NSBezierPath(roundedRect: NSRect(x: x + 1, y: y + 1, width: fw, height: 5), xRadius: 2.5, yRadius: 2.5).fill() }
-    }
 
     // MARK: mouse — drag across any screen
 
@@ -1009,7 +982,7 @@ final class Confetti {
 }
 
 
-// MARK: - Notch ear: the pet's icon in a black tab grown out of the MacBook notch
+// MARK: - Notch ear: the pet's icon in a black tab grown out of the left side of the MacBook notch
 
 final class EarView: NSView {
     var icon: NSImage?
@@ -1021,18 +994,18 @@ final class EarView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ r: NSRect) {
-        // black tab, flush with the notch on the left, rounded at the bottom right like the notch itself
+        // black tab, flush with the notch on its right, rounded at the bottom left like the notch itself
         let b = bounds, rad: CGFloat = 9
         let path = NSBezierPath()
-        path.move(to: NSPoint(x: 0, y: b.maxY))
-        path.line(to: NSPoint(x: b.maxX, y: b.maxY))
-        path.line(to: NSPoint(x: b.maxX, y: rad))
-        path.appendArc(withCenter: NSPoint(x: b.maxX - rad, y: rad), radius: rad, startAngle: 0, endAngle: -90, clockwise: true)
-        path.line(to: NSPoint(x: 0, y: 0))
+        path.move(to: NSPoint(x: b.maxX, y: b.maxY))
+        path.line(to: NSPoint(x: 0, y: b.maxY))
+        path.line(to: NSPoint(x: 0, y: rad))
+        path.appendArc(withCenter: NSPoint(x: rad, y: rad), radius: rad, startAngle: 180, endAngle: 270)
+        path.line(to: NSPoint(x: b.maxX, y: 0))
         path.close()
         NSColor.black.setFill()
         path.fill()
-        let area = NSRect(x: notchOverlap, y: 0, width: b.width - notchOverlap, height: b.height)
+        let area = NSRect(x: 0, y: 0, width: b.width - notchOverlap, height: b.height)
         let hop = Date().timeIntervalSince1970 < bumpUntil ? CGFloat(2) : 0
         let c = NSPoint(x: area.midX, y: area.midY + hop)
         // health ring around the pet: fills clockwise from the top, green → yellow → red
@@ -1067,7 +1040,7 @@ final class EarView: NSView {
 final class NotchEar {
     let panel: NSPanel
     let view = EarView()
-    static let width: CGFloat = 34   // visible part, right of the notch
+    static let width: CGFloat = 34   // visible part, left of the notch
 
     init() {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 46, height: 32),
@@ -1091,10 +1064,10 @@ final class NotchEar {
         return nil
     }
 
-    /// Sits the tab against the notch's right edge; false when no screen has a notch.
+    /// Sits the tab against the notch's left edge; false when no screen has a notch.
     @discardableResult func place() -> Bool {
         guard let n = NotchEar.notchRect() else { panel.orderOut(nil); return false }
-        let f = NSRect(x: n.maxX - view.notchOverlap, y: n.minY, width: NotchEar.width + view.notchOverlap, height: n.height)
+        let f = NSRect(x: n.minX - NotchEar.width, y: n.minY, width: NotchEar.width + view.notchOverlap, height: n.height)
         panel.setFrame(f, display: true)
         view.frame = NSRect(origin: .zero, size: f.size)
         panel.orderFrontRegardless()
@@ -1763,9 +1736,9 @@ if let earPath = ProcessInfo.processInfo.environment["CLAWDLING_EARSHOT"] {
         v.fullness = f
         g.cgContext.saveGState()
         g.cgContext.scaleBy(x: k, y: k)
-        g.cgContext.translateBy(x: CGFloat(i) * ew + 30, y: 0)
+        g.cgContext.translateBy(x: CGFloat(i) * ew + 10, y: 0)
         NSColor.black.setFill()
-        NSRect(x: -30, y: 0, width: 42, height: eh).fill()   // stand-in for the notch
+        NSRect(x: NotchEar.width, y: 0, width: 42, height: eh).fill()   // stand-in for the notch
         v.draw(v.bounds)
         g.cgContext.restoreGState()
     }
