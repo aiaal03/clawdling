@@ -59,6 +59,8 @@ Each egg hatches into a random **slime, ghost, kitty, fox kit, froglet, crab or 
 | Work after midnight | 🦉 **Night Owl** |
 | Subagents | 👑 **Hive Queen**, with two minions in orbit |
 
+<p align="center"><img src="assets/evolutions.png" alt="Evolution chart: egg, baby and the five evolved forms of every species" width="100%"></p>
+
 <p align="center"><img src="assets/all.png" alt="Every species in every state: egg, forms, hungry, starving, gravestone, searching, celebrating" width="100%"></p>
 
 ## Using it
