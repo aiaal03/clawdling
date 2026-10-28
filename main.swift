@@ -311,6 +311,7 @@ final class World {
     var onFood: ((String, Double) -> Void)?
     var onAsk: (() -> Void)?
     var onDone: (() -> Void)?
+    var onEvolve: (() -> Void)?
     var onActivity: (() -> Void)?
 
     init() {
@@ -436,6 +437,7 @@ final class World {
             var p = pet
             p.form = pickForm(p)
             pet = p
+            onEvolve?()
         }
         let left = DEATH_HOURS * 3600 - (now - pet.lastFood)
         if full(at: now) <= 0 && !pet.notifiedHungry {
@@ -747,6 +749,26 @@ final class PetView: NSView {
         }
     }
 
+    /// The body alone at the canvas origin (16×16 cells), for the evolution show: `white` washes it into a silhouette.
+    func drawBody(form: String?, white: CGFloat, party: Bool) {
+        let sp = world.species
+        let pal = palette(body: sp.colors[world.pet.colorIndex % sp.colors.count], accent: sp.accent, light: sp.light, outline: sp.outline, mouth: sp.mouth)
+        let spr = sprite(sp.rows)
+        let img = spriteImage(rows: sp.rows, sprite: spr, pal: pal, palKey: "\(sp.id)\(world.pet.colorIndex)",
+                              closed: party, party: party, open: party, grey: false)
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        NSGraphicsContext.current?.imageInterpolation = .none
+        img.draw(in: NSRect(x: 0, y: 0, width: 16 * CELL, height: 16 * CELL), from: .zero,
+                 operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        if let form { drawForm(form, spr, pal) }
+        if white > 0 {
+            NSColor(calibratedRed: 1, green: 0.98, blue: 0.9, alpha: min(1, white)).set()
+            NSRect(x: -4 * CELL, y: -4 * CELL, width: 24 * CELL, height: 24 * CELL).fill(using: .sourceAtop)
+        }
+        ctx.endTransparencyLayer()
+    }
+
     func drawMagnifier() {
         // magnifier in the paw on the walking side; a magnified eye in the glass looks for you
         let dir: CGFloat = lean >= 0 ? 1 : -1
@@ -1040,6 +1062,235 @@ final class Confetti {
 }
 
 
+// MARK: - Evolution: the pet spins up into a blaze of light, whirls in mid-air, bursts and lands in its new form
+
+final class EvolveView: NSView {
+    struct Spark { var x, y, vx, vy, life, max, size: CGFloat; var color: NSColor; var star: Bool }
+    unowned let pet: PetView
+    let oldForm: String?, newForm: String
+    var cx: CGFloat = 0, floorY: CGFloat = 0, s: CGFloat = 1   // floorY: the feet line, flipped view coordinates
+    var age = 0.0, phase: CGFloat = 0, flick: CGFloat = 0, shake: CGFloat = 0
+    var sparks: [Spark] = []
+    var burst = false
+    // timeline, seconds
+    static let rise = 0.8, top = 2.8, pop = 4.7, fall = 6.1, land = 6.7, end = 8.4
+    override var isFlipped: Bool { true }
+
+    init(pet: PetView, oldForm: String?, newForm: String, frame: NSRect) {
+        self.pet = pet; self.oldForm = oldForm; self.newForm = newForm
+        super.init(frame: frame)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func ease(_ x: Double) -> CGFloat { let k = min(1, max(0, x)); return CGFloat(k < 0.5 ? 4 * k * k * k : 1 - pow(-2 * k + 2, 3) / 2) }
+    func k(_ a: Double, _ b: Double) -> CGFloat { CGFloat(min(1, max(0, (age - a) / (b - a)))) }
+
+    var lift: CGFloat {
+        let h = 230 * s
+        if age < Self.rise { return 0 }
+        if age < Self.top { return h * ease((age - Self.rise) / (Self.top - Self.rise)) }
+        if age < Self.fall { return h + CGFloat(sin((age - Self.top) * 2.6)) * 6 * s }
+        let x = k(Self.fall, Self.land)
+        return h * (1 - x * x)
+    }
+    /// How bright the light is, 0…1.
+    var glow: CGFloat {
+        if age < Self.rise { return 0.35 * k(0, Self.rise) }
+        if age < Self.top { return 0.35 + 0.3 * k(Self.rise, Self.top) }
+        if age < Self.pop { return 0.65 + 0.35 * k(Self.top, Self.pop) }
+        return 0.9 * (1 - k(Self.pop + 0.3, Self.land + 0.4))
+    }
+    /// Spin speed around the body's own vertical axis, rad/s.
+    var omega: CGFloat {
+        if age < Self.rise { return 0 }
+        if age < Self.top { return 3 + 15 * k(Self.rise, Self.top) }
+        if age < Self.pop { return 18 + 34 * k(Self.top, Self.pop) }
+        return 0
+    }
+    var white: CGFloat {
+        if age < Self.rise { return 0 }
+        if age < Self.top { return 0.4 * k(Self.rise, Self.top) }
+        if age < Self.pop { return 0.4 + 0.6 * k(Self.top, Self.pop - 0.4) }
+        return 1 - k(Self.pop + 0.15, Self.pop + 0.9)
+    }
+    var center: NSPoint { NSPoint(x: cx + shake, y: floorY - 2 * s - lift - 8 * CELL * s) }
+
+    let gold = [0xffffff, 0xfff3b0, 0xffd23f, 0xffb43c, 0xbfe9ff]
+
+    func step(_ dt: CGFloat) {
+        age += Double(dt)
+        phase += omega * dt
+        if age > Self.top && age < Self.pop {   // the old and new look swap faster and faster
+            flick += dt / (0.32 - 0.27 * k(Self.top, Self.pop))
+        }
+        let trem: CGFloat = age < Self.rise ? 2 * k(0, Self.rise) : (age > Self.top && age < Self.pop ? 4 * k(Self.top, Self.pop) : 0)
+        shake = trem > 0 ? CGFloat.random(in: -trem...trem) * s : 0
+        let c = center
+        // charging: motes of light stream into the body
+        if age < Self.pop {
+            let rate = 30 + 90 * Double(glow)
+            for _ in 0..<Int((rate * Double(dt) + Double.random(in: 0...1)).rounded(.down)) {
+                let a = CGFloat.random(in: 0...(2 * .pi)), r = CGFloat.random(in: 120...260) * s
+                let life = CGFloat.random(in: 0.45...0.8)
+                sparks.append(Spark(x: c.x + cos(a) * r, y: c.y + sin(a) * r, vx: -cos(a) * r / life, vy: -sin(a) * r / life,
+                                    life: life, max: life, size: CGFloat.random(in: 2...4).rounded() * s,
+                                    color: hex(gold.randomElement()!), star: false))
+            }
+        }
+        if age >= Self.pop && !burst {
+            burst = true
+            let sp = pet.world.species
+            let tints = gold + [sp.colors[pet.world.pet.colorIndex % sp.colors.count], sp.accent]
+            for i in 0..<220 {
+                let a = CGFloat.random(in: 0...(2 * .pi)), v = CGFloat.random(in: 250...1300) * s
+                let life = CGFloat.random(in: 0.9...2.2)
+                sparks.append(Spark(x: c.x, y: c.y, vx: cos(a) * v, vy: sin(a) * v - 200 * s, life: life, max: life,
+                                    size: CGFloat.random(in: 3...7).rounded() * s, color: hex(tints.randomElement()!), star: i % 6 == 0))
+            }
+        }
+        for i in sparks.indices {
+            sparks[i].life -= dt
+            if age >= Self.pop { sparks[i].vy += 700 * s * dt * (sparks[i].star ? 0.3 : 1) }
+            let drag = pow(0.25, dt)
+            if age >= Self.pop { sparks[i].vx *= drag; sparks[i].vy *= drag }
+            sparks[i].x += sparks[i].vx * dt
+            sparks[i].y += sparks[i].vy * dt
+        }
+        sparks.removeAll { $0.life <= 0 }
+        needsDisplay = true
+    }
+
+    override func draw(_ r: NSRect) {
+        NSColor.clear.set()
+        r.fill(using: .copy)
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let c = center, g = glow, t = CGFloat(age)
+
+        // rays turning slowly behind the pet
+        if g > 0.02 {
+            ctx.saveGState()
+            ctx.translateBy(x: c.x, y: c.y)
+            ctx.rotate(by: t * 0.7)
+            let n = 16
+            for i in 0..<n {
+                let a = CGFloat(i) / CGFloat(n) * 2 * .pi
+                let len = (160 + 520 * g) * s * (i % 2 == 0 ? 1 : 0.62) * (1 + 0.08 * sin(t * 5 + CGFloat(i)))
+                let wd: CGFloat = i % 2 == 0 ? 0.055 : 0.035
+                let path = CGMutablePath()
+                path.move(to: .zero)
+                path.addLine(to: CGPoint(x: cos(a - wd) * len, y: sin(a - wd) * len))
+                path.addLine(to: CGPoint(x: cos(a + wd) * len, y: sin(a + wd) * len))
+                path.closeSubpath()
+                ctx.addPath(path)
+                ctx.saveGState()
+                ctx.clip()
+                let rg = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                    colors: [CGColor(red: 1, green: 0.97, blue: 0.8, alpha: 0.55 * g), CGColor(red: 1, green: 0.85, blue: 0.4, alpha: 0)] as CFArray,
+                                    locations: [0, 1])!
+                ctx.drawRadialGradient(rg, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: len, options: [])
+                ctx.restoreGState()
+            }
+            ctx.restoreGState()
+        }
+        // the blaze itself
+        if g > 0.01 {
+            let R = (70 + 190 * g) * s * (1 + 0.04 * sin(t * 9))
+            let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [
+                CGColor(red: 1, green: 1, blue: 1, alpha: min(1, 1.1 * g)),
+                CGColor(red: 1, green: 0.97, blue: 0.82, alpha: 0.85 * g),
+                CGColor(red: 1, green: 0.84, blue: 0.42, alpha: 0.4 * g),
+                CGColor(red: 1, green: 0.6, blue: 0.2, alpha: 0)] as CFArray, locations: [0, 0.22, 0.55, 1])!
+            ctx.drawRadialGradient(grad, startCenter: c, startRadius: 0, endCenter: c, endRadius: R, options: [])
+        }
+        // shadow left on the floor
+        if age < Self.land + 0.3 {
+            let w = max(10, 70 * s * (1 - lift / (300 * s)))
+            hex(0x000000, 0.18).setFill()
+            NSBezierPath(ovalIn: NSRect(x: cx - w / 2, y: floorY - 6 * s, width: w, height: 8 * s)).fill()
+        }
+        // the pet: turns around its own axis, flickers between the old and the new look, then bursts out new
+        if age < Self.land {
+            ctx.saveGState()
+            ctx.translateBy(x: c.x, y: c.y + 8 * CELL * s)
+            var sx = cos(phase), pop: CGFloat = 1
+            if age >= Self.pop {
+                sx = 1
+                let x = k(Self.pop, Self.pop + 0.45)
+                pop = 1 + 0.45 * (1 - x) * cos(x * 9)
+            }
+            if abs(sx) < 0.08 { sx = sx < 0 ? -0.08 : 0.08 }   // edge-on: a sliver, not nothing
+            ctx.scaleBy(x: s * sx * pop, y: s * pop)
+            ctx.translateBy(x: -8 * CELL, y: -16 * CELL)
+            ctx.setShouldAntialias(false)
+            let form = age >= Self.pop ? newForm : (Int(flick) % 2 == 1 ? newForm : oldForm)
+            pet.drawBody(form: form, white: white, party: age < Self.pop || age > Self.fall)
+            ctx.restoreGState()
+        }
+        // flash and shock rings at the burst
+        if age >= Self.pop {
+            let x = CGFloat(age - Self.pop)
+            if x < 0.5 {
+                NSColor(calibratedRed: 1, green: 0.98, blue: 0.9, alpha: 0.75 * (1 - x / 0.5)).setFill()
+                bounds.fill(using: .sourceOver)
+            }
+            for (i, delay) in [0.0, 0.12].enumerated() {
+                let y = x - CGFloat(delay)
+                guard y > 0 && y < 0.7 else { continue }
+                let rad = (40 + 1500 * y * (1 - y * 0.6)) * s
+                let ring = NSBezierPath(ovalIn: NSRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2))
+                ring.lineWidth = (i == 0 ? 14 : 7) * s * (1 - y / 0.7)
+                NSColor(calibratedRed: 1, green: 0.95, blue: 0.75, alpha: 0.9 * (1 - y / 0.7)).setStroke()
+                ring.stroke()
+            }
+        }
+        // pixel sparks and four-point stars
+        ctx.setShouldAntialias(false)
+        for p in sparks {
+            let a = min(1, p.life / p.max * 2.2)
+            p.color.withAlphaComponent(a).setFill()
+            let z = p.size
+            if p.star {
+                let arm = sin(t * 18 + p.x) > 0 ? z : 0   // twinkle: the arms blink in and out
+                NSRect(x: (p.x - z / 2).rounded(), y: (p.y - z / 2 - arm).rounded(), width: z, height: z + 2 * arm).fill()
+                NSRect(x: (p.x - z / 2 - arm).rounded(), y: (p.y - z / 2).rounded(), width: z + 2 * arm, height: z).fill()
+            } else {
+                NSRect(x: (p.x - z / 2).rounded(), y: (p.y - z / 2).rounded(), width: z, height: z).fill()
+            }
+        }
+    }
+}
+
+final class Evolution {
+    let panel: NSPanel
+    let view: EvolveView
+
+    init(pet: PetView, oldForm: String?, newForm: String, centerX: CGFloat, floor: CGFloat, scale: CGFloat) {
+        let scr = NSScreen.screens.first { $0.frame.minX <= centerX && centerX < $0.frame.maxX && $0.frame.minY <= floor + 1 && floor < $0.frame.maxY }
+            ?? NSScreen.main ?? NSScreen.screens[0]
+        let f = scr.frame
+        panel = NSPanel(contentRect: f, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.depthLimit = .twentyfourBitRGB
+        view = EvolveView(pet: pet, oldForm: oldForm, newForm: newForm, frame: NSRect(origin: .zero, size: f.size))
+        view.cx = centerX - f.minX
+        view.floorY = f.maxY - floor
+        view.s = scale
+        panel.contentView = view
+        panel.orderFrontRegardless()
+    }
+
+    var landed: Bool { view.age >= EvolveView.land }
+    var isDone: Bool { view.age >= EvolveView.end }
+    func step(_ dt: CGFloat) { view.step(dt) }
+    func close() { panel.orderOut(nil) }
+}
+
+
 // MARK: - Notch ear: the pet's icon in a black tab grown out of the left side of the MacBook notch
 
 final class EarView: NSView {
@@ -1161,6 +1412,8 @@ final class App: NSObject, NSApplicationDelegate {
     var lastPlay = ProcessInfo.processInfo.environment["CLAWDLING_PLAY"] != nil ? 0 : Date().timeIntervalSince1970 - 30
     var lastKick = 0.0
     var confetti: [Confetti] = []
+    var evolution: Evolution?
+    var evolveQueued = ProcessInfo.processInfo.environment["CLAWDLING_EVOLVE"] != nil
     var searchUntil = 0.0
     var nextSearchHop = 0.0
     var roam: Bool { world.save.roam ?? true }
@@ -1209,6 +1462,7 @@ final class App: NSObject, NSApplicationDelegate {
         }
         world.onActivity = { [weak self] in self?.stopSearch() }
         world.onDone = { [weak self] in self?.celebrate() }
+        world.onEvolve = { [weak self] in self?.evolveQueued = true }
         view.menuProvider = { [weak self] in self?.makeMenu() ?? NSMenu() }
         view.onDoubleClick = { [weak self] in self?.showStats() }
         view.onPick = { [weak self] in self?.act = "fall"; self?.vx = 0; self?.vy = 0 }
@@ -1535,6 +1789,36 @@ final class App: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Starts the show once the pet stands still on a floor: it hides, and the light panel plays it out.
+    func evolveStep(_ dt: CGFloat) {
+        if evolution == nil && evolveQueued && air == 0 && vy == 0 && !view.held,
+           let form = world.pet.form, !world.pet.dead {
+            evolveQueued = false
+            endPlay()
+            stopSearch()
+            view.spin = 0
+            vx = 0
+            act = "idle"
+            let s = CGFloat(world.save.scale)
+            evolution = Evolution(pet: view, oldForm: nil, newForm: form, centerX: panel.frame.midX,
+                                  floor: panel.frame.minY + footOffset - 2 * s, scale: s)
+            panel.alphaValue = 0
+            panel.ignoresMouseEvents = true
+        }
+        guard let e = evolution else { return }
+        e.step(dt)
+        if e.landed && panel.alphaValue == 0 {
+            panel.alphaValue = 1
+            panel.ignoresMouseEvents = false
+            view.squashAmt = 0.25
+            view.squashUntil = view.t + 0.22
+            celebrate()
+        }
+        if e.isDone { e.close(); evolution = nil }
+    }
+
+    @objc func evolveAction() { evolveQueued = true }
+
     func endPlay() {
         toy?.close()
         toy = nil
@@ -1548,7 +1832,7 @@ final class App: NSObject, NSApplicationDelegate {
     /// Frame rate for what is happening now: flight, drags and toys get every display frame,
     /// walking and eating 60 fps, rest 30 fps.
     var frameRate: Double {
-        if air > 0 || vy != 0 || vx != 0 || view.held || toy != nil || !confetti.isEmpty { return 1000 }
+        if air > 0 || vy != 0 || vx != 0 || view.held || toy != nil || !confetti.isEmpty || evolution != nil { return 1000 }
         if view.walking || view.searching || !view.drops.isEmpty || !view.pending.isEmpty
             || view.t < view.celebrateUntil || view.t < view.squashUntil { return 60 }
         return 30
@@ -1558,8 +1842,9 @@ final class App: NSObject, NSApplicationDelegate {
         let t = Date().timeIntervalSince1970
         if t - lastStep < 1 / frameRate - 0.002 { return }
         let dt = min(0.05, t - lastStep)
-        roamStep(dt: CGFloat(dt), now: t)
+        if evolution == nil || evolution!.landed { roamStep(dt: CGFloat(dt), now: t) }
         view.step(dt: dt)
+        evolveStep(CGFloat(dt))
         lastStep = t
         if fpsLog {   // debug: CLAWDLING_FPSLOG=1 logs frames per second while something moves
             fpsFrames += 1
@@ -1612,6 +1897,9 @@ final class App: NSObject, NSApplicationDelegate {
         let walkItem = item("Walk around the screen", #selector(roamAction))
         walkItem.state = roam ? .on : .off
         m.addItem(walkItem)
+        if p.form != nil && !p.dead && evolution == nil {
+            m.addItem(item("Replay evolution ✨", #selector(evolveAction)))
+        }
         if roam && toy == nil && !world.isEgg && !p.dead {
             m.addItem(item("Give a toy 🧶", #selector(toyAction)))
         }
@@ -1873,6 +2161,34 @@ if let sheetPath = ProcessInfo.processInfo.environment["CLAWDLING_SHEET"] {
     }
     NSGraphicsContext.restoreGraphicsState()
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: sheetPath))
+    exit(0)
+}
+
+// Debug: CLAWDLING_EVOFRAMES=/dir renders the evolution show at 30 fps (evo_000.png …, transparent).
+if let dir = ProcessInfo.processInfo.environment["CLAWDLING_EVOFRAMES"] {
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let world = World()
+    let form = ProcessInfo.processInfo.environment["CLAWDLING_EVOFORM"] ?? world.pet.form ?? "owl"
+    let pv = PetView(world: world)
+    let fw: CGFloat = 960, fh: CGFloat = 640
+    let ev = EvolveView(pet: pv, oldForm: nil, newForm: form, frame: NSRect(x: 0, y: 0, width: fw, height: fh))
+    ev.cx = fw / 2; ev.floorY = fh - 40; ev.s = 1
+    var i = 0
+    while ev.age < EvolveView.end {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(fw), pixelsHigh: Int(fh), bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        let g = NSGraphicsContext(bitmapImageRep: rep)!
+        NSGraphicsContext.current = g
+        g.cgContext.translateBy(x: 0, y: fh)
+        g.cgContext.scaleBy(x: 1, y: -1)
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: g.cgContext, flipped: true)
+        ev.draw(ev.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+        try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: dir + String(format: "/evo_%03d.png", i)))
+        ev.step(1.0 / 30)
+        i += 1
+    }
     exit(0)
 }
 

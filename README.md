@@ -61,6 +61,10 @@ Each egg hatches into a random **slime, ghost, kitty, fox kit, froglet, crab or 
 
 <p align="center"><img src="assets/evolutions.png" alt="Evolution chart: egg, baby and the five evolved forms of every species" width="100%"></p>
 
+On day 7 it spins up into a blaze of light, whirls between its old and new look, bursts and lands evolved (missed it? menu → **Replay evolution**):
+
+![evolution](assets/evolution.gif)
+
 <p align="center"><img src="assets/all.png" alt="Every species in every state: egg, forms, hungry, starving, gravestone, searching, celebrating" width="100%"></p>
 
 ## Using it
